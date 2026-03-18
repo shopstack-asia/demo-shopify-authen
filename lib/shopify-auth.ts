@@ -188,12 +188,12 @@ export async function exchangeCodeForTokens(params: {
 }
 
 /**
- * Ensure Shopify Customer Account API access tokens are prefixed with `shcat_`.
+ * Return the Shopify Customer Account API access token as-is.
+ * Some setups already return a correctly formatted token, so we avoid
+ * mutating it (prefixing) to prevent invalid_token errors.
  */
 export function formatAccessToken(token: string): string {
-  const trimmed = token.trim();
-  if (trimmed.startsWith("shcat_")) return trimmed;
-  return `shcat_${trimmed}`;
+  return token.trim();
 }
 
 /**
