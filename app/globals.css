@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0e17;
+  --foreground: #f1f5f9;
+  --accent: #f59e0b;
+  --card: rgba(15, 23, 42, 0.7);
+  --border: rgba(148, 163, 184, 0.12);
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+}
