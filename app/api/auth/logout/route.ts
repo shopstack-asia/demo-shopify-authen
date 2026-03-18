@@ -1,17 +1,42 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { discoverAuthEndpoints } from "@/lib/shopify-auth";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const session = await getSession();
-  session.customerId = "";
-  session.customerAccessToken = "";
-  session.email = "";
+  const idToken = session.idToken;
+
   session.isLoggedIn = false;
+  session.accessToken = "";
+  session.refreshToken = "";
+  session.idToken = "";
+  session.customerId = "";
+  session.codeVerifier = "";
+  session.nonce = "";
+  session.state = "";
+  session.returnTo = "";
   session.destroy();
 
-  const loginUrl = "/login?returnTo=/profile";
-  return NextResponse.json(
-    { success: true, data: { redirectUrl: loginUrl } },
-    { status: 200 }
-  );
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const postLogoutRedirectUri = `${appUrl.replace(/\/+$/g, "")}/login`;
+
+  if (!idToken) {
+    return NextResponse.redirect(postLogoutRedirectUri);
+  }
+
+  const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
+  const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
+  if (!storeDomain) {
+    return NextResponse.redirect(postLogoutRedirectUri);
+  }
+
+  try {
+    const endpoints = await discoverAuthEndpoints(storeDomain);
+    const endUrl = new URL(endpoints.end_session_endpoint);
+    endUrl.searchParams.set("id_token_hint", idToken);
+    endUrl.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri);
+    return NextResponse.redirect(endUrl);
+  } catch {
+    return NextResponse.redirect(postLogoutRedirectUri);
+  }
 }

@@ -1,96 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { customerLogin, getCustomerProfile } from "@/lib/shopify";
-import { getMultipassRedirectUrl } from "@/lib/multipass";
+import {
+  discoverAuthEndpoints,
+  generateCodeChallenge,
+  generateCodeVerifier,
+  generateNonce,
+  generateState,
+  getRedirectUri,
+} from "@/lib/shopify-auth";
 
-export interface LoginBody {
-  email?: string;
-  password?: string;
-  returnTo?: string;
+function redirectToLoginWithError(request: NextRequest, errorMessage: string) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? request.url;
+  const base = appUrl.endsWith("/") ? appUrl.slice(0, -1) : appUrl;
+  const loginUrl = new URL("/login", base);
+  loginUrl.searchParams.set("error", errorMessage);
+  return NextResponse.redirect(loginUrl);
 }
 
-export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
+function sanitizeReturnTo(input: unknown): string {
+  const value = typeof input === "string" ? input : "";
+  if (!value) return "/profile";
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  return "/profile";
 }
 
-function humanReadableError(message: string): string {
-  const lower = message.toLowerCase();
-  if (lower.includes("unable to find") || lower.includes("customer")) return "Invalid email or password.";
-  if (lower.includes("password")) return "Invalid email or password.";
-  if (lower.includes("throttl")) return "Too many attempts. Please try again later.";
-  return message || "Something went wrong. Please try again.";
-}
+export async function GET(request: NextRequest) {
+  const session = await getSession();
 
-export async function POST(request: NextRequest) {
+  // Always treat this as the start of an OAuth flow (not yet logged in).
+  session.isLoggedIn = false;
+  session.accessToken = "";
+  session.refreshToken = "";
+  session.idToken = "";
+  session.customerId = "";
+  session.codeVerifier = "";
+  session.nonce = "";
+  session.state = "";
+
   try {
-    const body = (await request.json()) as LoginBody;
-    const email = typeof body.email === "string" ? body.email.trim() : "";
-    const password = typeof body.password === "string" ? body.password : "";
-    const returnTo = typeof body.returnTo === "string" ? body.returnTo : "/profile";
+    const returnTo = sanitizeReturnTo(new URL(request.url).searchParams.get("returnTo"));
+    const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
+    const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
 
-    if (!email || !password) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: "Email and password are required." },
-        { status: 400 }
-      );
+    if (!storeDomain) {
+      return redirectToLoginWithError(request, "Missing SHOPIFY_STORE_DOMAIN");
     }
 
-    const result = await customerLogin(email, password);
+    const endpoints = await discoverAuthEndpoints(storeDomain);
 
-    if (result.userErrors.length > 0) {
-      const msg = result.userErrors[0]?.message ?? "Invalid credentials.";
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: humanReadableError(msg) },
-        { status: 400 }
-      );
-    }
+    const codeVerifier = await generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const state = generateState();
+    const nonce = generateNonce();
 
-    const token = result.customerAccessToken;
-    if (!token?.accessToken) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: "Could not create session." },
-        { status: 400 }
-      );
-    }
-
-    const profile = await getCustomerProfile(token.accessToken);
-    const customer = profile.customer;
-    if (!customer) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: "Could not load customer profile." },
-        { status: 400 }
-      );
-    }
-
-    const session = await getSession();
-    session.customerId = customer.id;
-    session.customerAccessToken = token.accessToken;
-    session.email = customer.email;
-    session.isLoggedIn = true;
+    session.codeVerifier = codeVerifier;
+    session.state = state;
+    session.nonce = nonce;
+    session.returnTo = returnTo;
     await session.save();
 
-    let redirectUrl: string;
-    if (process.env.SHOPIFY_MULTIPASS_SECRET) {
-      try {
-        redirectUrl = getMultipassRedirectUrl(customer.email, returnTo);
-      } catch {
-        redirectUrl = returnTo.startsWith("http") ? returnTo : `${request.nextUrl.origin}${returnTo}`;
-      }
-    } else {
-      redirectUrl = returnTo.startsWith("http") ? returnTo : `${request.nextUrl.origin}${returnTo}`;
+    // Use NEXT_PUBLIC_APP_URL as the source of truth for redirect_uri.
+    // This must exactly match what you configured in Shopify.
+    const redirectUri = getRedirectUri();
+    const authorizationUrl = new URL(endpoints.authorization_endpoint);
+
+    const clientId = (process.env.SHOPIFY_CLIENT_ID ?? "").trim();
+    if (!clientId) {
+      return redirectToLoginWithError(request, "Missing SHOPIFY_CLIENT_ID");
     }
 
-    return NextResponse.json<ApiResponse<{ redirectUrl: string }>>({
-      success: true,
-      data: { redirectUrl },
-    });
+    authorizationUrl.searchParams.set("scope", "openid email customer-account-api:full");
+    authorizationUrl.searchParams.set("client_id", clientId);
+    authorizationUrl.searchParams.set("response_type", "code");
+    authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+    authorizationUrl.searchParams.set("state", state);
+    authorizationUrl.searchParams.set("nonce", nonce);
+    authorizationUrl.searchParams.set("code_challenge", codeChallenge);
+    authorizationUrl.searchParams.set("code_challenge_method", "S256");
+
+    return NextResponse.redirect(authorizationUrl);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Login failed.";
-    return NextResponse.json<ApiResponse>(
-      { success: false, error: humanReadableError(message) },
-      { status: 500 }
-    );
+    return redirectToLoginWithError(request, message);
   }
 }
