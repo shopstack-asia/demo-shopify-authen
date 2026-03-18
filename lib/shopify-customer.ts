@@ -135,7 +135,9 @@ export async function getCustomerProfile(accessToken: string): Promise<ShopifyCu
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      // Customer Account API expects the access token in the Authorization header.
+      // Some implementations require sending it directly without the "Bearer" prefix.
+      Authorization: accessToken,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query }),
