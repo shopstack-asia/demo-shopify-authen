@@ -79,6 +79,26 @@ function ProfileSkeleton() {
   );
 }
 
+function classifyProfileFetchError(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+
+  // Try to extract HTTP status from our own error format.
+  const statusMatch = message.match(/Customer Account API error:\s*(\d{3})/i);
+  const status = statusMatch?.[1];
+
+  if (status === "401") return "profile_fetch_failed_invalid_token";
+  if (status === "403") return "profile_fetch_failed_forbidden";
+  if (status === "404") return "profile_fetch_failed_not_found";
+  if (status === "400") return "profile_fetch_failed_bad_request";
+
+  // GraphQL schema / query issues usually mention "Field" or similar.
+  if (message.toLowerCase().includes("field")) return "profile_fetch_failed_graphql_field_error";
+
+  if (message.toLowerCase().includes("no data")) return "profile_fetch_failed_no_data";
+
+  return "profile_fetch_failed";
+}
+
 async function ProfileContent() {
   const session = await getSession();
   if (!session.isLoggedIn || !session.accessToken) {
@@ -104,16 +124,19 @@ async function ProfileContent() {
   try {
     const profile = await getCustomerProfile(session.accessToken);
     customer = profile.customer;
-  } catch {
+  } catch (err) {
     redirect(
-      `/login?returnTo=/profile&error=${encodeURIComponent("profile_fetch_failed")}`
+      `/login?returnTo=/profile&error=${encodeURIComponent(classifyProfileFetchError(
+        err
+      ))}`
     );
   }
 
-  if (!customer)
+  if (!customer) {
     redirect(
       `/login?returnTo=/profile&error=${encodeURIComponent("customer_not_found")}`
     );
+  }
 
   const name = [customer.firstName, customer.lastName].filter(Boolean).join(" ");
   const initials =
