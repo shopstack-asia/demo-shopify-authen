@@ -2,16 +2,26 @@ import { getIronSession, type SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
 
 export interface SessionData {
-  customerId: string;
-  customerAccessToken: string;
-  email: string;
+  accessToken: string; // shcat_
+  refreshToken: string;
+  idToken: string;
+  customerId: string; // from id_token sub
+  nonce: string;
+  state: string;
+  codeVerifier: string; // cleared after exchange
+  returnTo: string;
   isLoggedIn: boolean;
 }
 
 const defaultSession: SessionData = {
+  accessToken: "",
+  refreshToken: "",
+  idToken: "",
   customerId: "",
-  customerAccessToken: "",
-  email: "",
+  nonce: "",
+  state: "",
+  codeVerifier: "",
+  returnTo: "",
   isLoggedIn: false,
 };
 
@@ -22,12 +32,12 @@ const sessionOptions: SessionOptions = {
     process.env.SESSION_SECRET.trim().length >= 32
       ? process.env.SESSION_SECRET.trim()
       : DEV_FALLBACK_PASSWORD,
-  cookieName: "shopify_custom_session",
+  cookieName: "shopify_session",
   cookieOptions: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 30, // 30 days
   },
 };
 

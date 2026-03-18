@@ -1,10 +1,11 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import { getCustomerProfile } from "@/lib/shopify";
-import type { ShopifyAddress, ShopifyOrder, ShopifyMetafield } from "@/lib/shopify";
+import { getCustomerProfile } from "@/lib/shopify-customer";
+import type { ShopifyCustomerAddress, ShopifyCustomerOrder } from "@/lib/shopify-customer";
 import LogoutButton from "./LogoutButton";
 
-function formatAddress(addr: ShopifyAddress): string {
+function formatAddress(addr: ShopifyCustomerAddress): string {
   const parts = [
     addr.address1,
     addr.address2,
@@ -12,11 +13,11 @@ function formatAddress(addr: ShopifyAddress): string {
     addr.province,
     addr.zip,
     addr.country,
-  ].filter(Boolean);
+  ].filter((p) => typeof p === "string" && p.trim().length > 0);
   return parts.join(", ");
 }
 
-function FinancialStatusBadge({ status }: { status?: string }) {
+function FinancialStatusBadge({ status }: { status?: string | null }) {
   if (!status) return null;
   const map: Record<string, string> = {
     PAID: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
@@ -31,7 +32,7 @@ function FinancialStatusBadge({ status }: { status?: string }) {
   );
 }
 
-function FulfillmentStatusBadge({ status }: { status?: string }) {
+function FulfillmentStatusBadge({ status }: { status?: string | null }) {
   if (!status) return null;
   const map: Record<string, string> = {
     FULFILLED: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
@@ -46,126 +47,205 @@ function FulfillmentStatusBadge({ status }: { status?: string }) {
   );
 }
 
-export default async function ProfilePage() {
+function ProfileSkeleton() {
+  return (
+    <main className="min-h-screen bg-[#0a0e17] text-slate-200">
+      <div className="max-w-6xl mx-auto px-4 py-10 grid gap-6 md:grid-cols-[240px,1fr]">
+        <aside className="hidden md:block rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="h-5 w-24 bg-white/10 rounded mb-4 animate-pulse" />
+          <div className="space-y-3">
+            <div className="h-10 bg-white/5 border border-white/10 rounded animate-pulse" />
+            <div className="h-10 bg-white/5 border border-white/10 rounded animate-pulse" />
+            <div className="h-10 bg-white/5 border border-white/10 rounded animate-pulse" />
+          </div>
+        </aside>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 animate-pulse" />
+            <div className="flex-1">
+              <div className="h-5 w-52 bg-white/10 rounded animate-pulse mb-2" />
+              <div className="h-4 w-64 bg-white/10 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="mt-6 grid gap-6 md:grid-cols-2">
+            <div className="h-48 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+            <div className="h-48 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+          </div>
+          <div className="mt-6 h-64 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+        </section>
+      </div>
+    </main>
+  );
+}
+
+async function ProfileContent() {
   const session = await getSession();
-  if (!session.isLoggedIn || !session.customerAccessToken) {
+  if (!session.isLoggedIn || !session.accessToken) {
     redirect("/login?returnTo=/profile");
   }
 
-  let customer;
+  let customer = null as null | {
+    id: string;
+    firstName: string;
+    lastName: string;
+    emailAddress: { emailAddress: string } | null;
+    phoneNumber: { phoneNumber: string } | null;
+    defaultAddress: ShopifyCustomerAddress | null;
+    addresses: { nodes: ShopifyCustomerAddress[] } | null;
+    orders: { nodes: ShopifyCustomerOrder[] } | null;
+  };
+
   try {
-    const profile = await getCustomerProfile(session.customerAccessToken);
+    const profile = await getCustomerProfile(session.accessToken);
     customer = profile.customer;
   } catch {
     redirect("/login?returnTo=/profile");
   }
 
-  if (!customer) {
-    redirect("/login?returnTo=/profile");
-  }
+  if (!customer) redirect("/login?returnTo=/profile");
 
-  const nameInitials = [customer.firstName, customer.lastName]
-    .filter(Boolean)
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase();
-  const initials = nameInitials || (customer.email[0]?.toUpperCase() ?? "?");
+  const name = [customer.firstName, customer.lastName].filter(Boolean).join(" ");
+  const initials =
+    [customer.firstName, customer.lastName]
+      .filter(Boolean)
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase() || "?";
 
-  const orders = customer.orders?.nodes ?? [];
+  const email = customer.emailAddress?.emailAddress ?? "";
+  const phone = customer.phoneNumber?.phoneNumber ?? null;
   const addresses = customer.addresses?.nodes ?? [];
-  const metafields = customer.metafields?.nodes ?? [];
+  const orders = customer.orders?.nodes ?? [];
 
   return (
     <main className="min-h-screen bg-[#0a0e17] text-slate-200">
-      <div className="max-w-5xl mx-auto px-4 py-8 md:py-12">
-        {/* Profile Header */}
-        <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 mb-10">
-          <div className="flex items-center gap-4">
-            <div
-              className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-display text-xl font-semibold"
-              aria-hidden
+      <div className="max-w-6xl mx-auto px-4 py-10 grid gap-6 md:grid-cols-[240px,1fr]">
+        {/* Sidebar */}
+        <aside className="hidden md:block rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="text-white font-display font-semibold mb-5">Account</div>
+          <nav className="space-y-2">
+            <a
+              href="#profile"
+              className="block rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-200 hover:border-white/20"
             >
-              {initials}
-            </div>
-            <div>
-              <h1 className="font-display text-2xl font-semibold text-white">
-                {[customer.firstName, customer.lastName].filter(Boolean).join(" ") || "Account"}
-              </h1>
-              <p className="text-slate-400 text-sm mt-0.5">{customer.email}</p>
-              {customer.phone && (
-                <p className="text-slate-400 text-sm">{customer.phone}</p>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-white/10 transition"
+              Profile
+            </a>
+            <a
+              href="#addresses"
+              className="block rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-200 hover:border-white/20"
             >
-              Edit Profile
-            </button>
-            <LogoutButton />
+              Addresses
+            </a>
+            <a
+              href="#orders"
+              className="block rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-200 hover:border-white/20"
+            >
+              Orders
+            </a>
+          </nav>
+          <div className="mt-6 border-t border-white/10 pt-4 text-xs text-slate-400">
+            Signed in via Shopify OTP
           </div>
-        </header>
+        </aside>
 
-        <div className="grid gap-8 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-8">
-            {/* Default Address */}
-            {customer.defaultAddress && (
-              <section className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:border-white/15 transition">
-                <h2 className="font-display text-lg font-semibold text-white mb-3">
-                  Default address
-                </h2>
-                <p className="text-slate-300 text-sm leading-relaxed">
-                  {formatAddress(customer.defaultAddress)}
-                </p>
+        {/* Content */}
+        <section id="profile" className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          {/* Header */}
+          <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+            <div className="flex items-center gap-4">
+              <div
+                className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-display text-xl font-semibold"
+                aria-hidden
+              >
+                {initials}
+              </div>
+              <div>
+                <h1 className="font-display text-2xl font-semibold text-white">
+                  {name || "Account"}
+                </h1>
+                <div className="text-slate-400 text-sm mt-0.5">{email}</div>
+                {phone && <div className="text-slate-400 text-sm mt-0.5">{phone}</div>}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-white/10 transition"
+              >
+                Edit Profile
+              </button>
+              <LogoutButton />
+            </div>
+          </header>
+
+          {/* Cards */}
+          <div className="mt-7 grid gap-6 lg:grid-cols-2">
+            {/* Default address */}
+            <section className="rounded-2xl border border-white/10 bg-black/20 p-5" id="addresses">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <h2 className="font-display text-lg font-semibold text-white">Default address</h2>
                 <button
                   type="button"
-                  className="mt-3 text-sm text-amber-400/90 hover:text-amber-400"
+                  className="text-sm text-amber-400/90 hover:text-amber-400 transition"
                 >
                   Change
                 </button>
-              </section>
-            )}
+              </div>
+              {customer.defaultAddress ? (
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  {formatAddress(customer.defaultAddress)}
+                  {customer.defaultAddress.phoneNumber ? (
+                    <>
+                      <br />
+                      {customer.defaultAddress.phoneNumber}
+                    </>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="text-slate-400 text-sm">No default address.</p>
+              )}
 
-            {/* All Addresses */}
-            {addresses.length > 0 && (
-              <section className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:border-white/15 transition">
-                <h2 className="font-display text-lg font-semibold text-white mb-4">
-                  Addresses
-                </h2>
-                <div className="space-y-3 max-h-64 overflow-y-auto">
-                  {addresses.map((addr) => (
-                    <div
-                      key={addr.id}
-                      className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm"
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-slate-400">
-                          {formatAddress(addr)}
-                        </span>
-                        {customer.defaultAddress?.id === addr.id && (
-                          <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
-                            Default
-                          </span>
-                        )}
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h3 className="font-display text-base font-semibold text-white mb-3">All addresses</h3>
+                {addresses.length === 0 ? (
+                  <p className="text-slate-400 text-sm">No saved addresses.</p>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+                    {addresses.map((addr) => (
+                      <div
+                        key={addr.id}
+                        className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="text-slate-300">{formatAddress(addr)}</div>
+                          {customer.defaultAddress?.id === addr.id ? (
+                            <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
+                              Default
+                            </span>
+                          ) : null}
+                        </div>
+                        {addr.phoneNumber ? (
+                          <div className="text-slate-400 text-xs mt-1">{addr.phoneNumber}</div>
+                        ) : null}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
 
-            {/* Order History */}
-            <section className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:border-white/15 transition">
-              <h2 className="font-display text-lg font-semibold text-white mb-4">
-                Order history
-              </h2>
+            {/* Orders */}
+            <section className="rounded-2xl border border-white/10 bg-black/20 p-5" id="orders">
+              <div className="mb-4">
+                <h2 className="font-display text-lg font-semibold text-white">Order history</h2>
+                <div className="text-slate-400 text-xs mt-1">Recent orders from Shopify</div>
+              </div>
               {orders.length === 0 ? (
                 <p className="text-slate-400 text-sm">No orders yet.</p>
               ) : (
                 <div className="space-y-4">
-                  {orders.map((order: ShopifyOrder) => (
+                  {orders.map((order) => (
                     <div
                       key={order.id}
                       className="rounded-xl border border-white/5 bg-black/20 p-4 flex flex-col sm:flex-row sm:items-center gap-4"
@@ -173,33 +253,32 @@ export default async function ProfilePage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                           <span className="font-medium text-white">
-                            #{order.orderNumber ?? order.id.split("/").pop()}
+                            #{order.number ?? order.id.split("/").pop()}
                           </span>
                           <FinancialStatusBadge status={order.financialStatus} />
                           <FulfillmentStatusBadge status={order.fulfillmentStatus} />
                         </div>
                         <p className="text-slate-400 text-sm">
-                          {order.processedAt
-                            ? new Date(order.processedAt).toLocaleDateString()
-                            : "—"}
+                          {order.processedAt ? new Date(order.processedAt).toLocaleDateString() : "—"}
                         </p>
-                        {order.totalPrice && (
+                        {order.totalPrice ? (
                           <p className="text-slate-300 text-sm mt-1">
-                            {order.totalPrice.currencyCode}{" "}
-                            {order.totalPrice.amount}
+                            {order.totalPrice.currencyCode} {order.totalPrice.amount}
                           </p>
-                        )}
+                        ) : null}
                       </div>
+
                       <div className="flex items-center gap-2 shrink-0">
                         {order.lineItems?.nodes?.slice(0, 3).map((line, i) => (
                           <div
-                            key={i}
+                            key={`${line.title}-${i}`}
                             className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden"
                           >
-                            {line.variant?.image?.url ? (
+                            {line.image?.url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
                               <img
-                                src={line.variant.image.url}
-                                alt={line.variant.image.altText ?? line.title}
+                                src={line.image.url}
+                                alt={line.image.altText ?? line.title}
                                 className="w-full h-full object-cover"
                               />
                             ) : (
@@ -216,29 +295,17 @@ export default async function ProfilePage() {
               )}
             </section>
           </div>
-
-          <div className="space-y-8">
-            {/* Metafields */}
-            {metafields.length > 0 && (
-              <section className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:border-white/15 transition">
-                <h2 className="font-display text-lg font-semibold text-white mb-4">
-                  Custom fields
-                </h2>
-                <dl className="space-y-2">
-                  {metafields.map((mf: ShopifyMetafield) => (
-                    <div key={`${mf.namespace}.${mf.key}`}>
-                      <dt className="text-slate-400 text-xs font-medium">
-                        {mf.namespace}.{mf.key}
-                      </dt>
-                      <dd className="text-slate-200 text-sm mt-0.5">{mf.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            )}
-          </div>
-        </div>
+        </section>
       </div>
     </main>
   );
 }
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={<ProfileSkeleton />}>
+      <ProfileContent />
+    </Suspense>
+  );
+}
+

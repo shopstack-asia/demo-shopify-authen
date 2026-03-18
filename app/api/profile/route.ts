@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getCustomerProfile } from "@/lib/shopify";
+import { getCustomerProfile } from "@/lib/shopify-customer";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -11,7 +11,7 @@ export interface ApiResponse<T = unknown> {
 export async function GET() {
   const session = await getSession();
 
-  if (!session.isLoggedIn || !session.customerAccessToken) {
+  if (!session.isLoggedIn || !session.accessToken) {
     return NextResponse.json<ApiResponse>(
       { success: false, error: "Unauthorized" },
       { status: 401 }
@@ -19,7 +19,7 @@ export async function GET() {
   }
 
   try {
-    const profile = await getCustomerProfile(session.customerAccessToken);
+    const profile = await getCustomerProfile(session.accessToken);
     if (!profile.customer) {
       return NextResponse.json<ApiResponse>(
         { success: false, error: "Customer not found" },
