@@ -12,6 +12,7 @@ export async function middleware(request: NextRequest) {
     const returnTo = request.nextUrl.pathname;
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", returnTo);
+    loginUrl.searchParams.set("error", "missing_session_cookie");
     return NextResponse.redirect(loginUrl);
   }
 

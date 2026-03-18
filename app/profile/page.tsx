@@ -82,7 +82,12 @@ function ProfileSkeleton() {
 async function ProfileContent() {
   const session = await getSession();
   if (!session.isLoggedIn || !session.accessToken) {
-    redirect("/login?returnTo=/profile");
+    const reason = !session.isLoggedIn
+      ? "session_not_logged_in"
+      : !session.accessToken
+        ? "access_token_missing"
+        : "session_invalid";
+    redirect(`/login?returnTo=/profile&error=${encodeURIComponent(reason)}`);
   }
 
   let customer = null as null | {
@@ -100,10 +105,15 @@ async function ProfileContent() {
     const profile = await getCustomerProfile(session.accessToken);
     customer = profile.customer;
   } catch {
-    redirect("/login?returnTo=/profile");
+    redirect(
+      `/login?returnTo=/profile&error=${encodeURIComponent("profile_fetch_failed")}`
+    );
   }
 
-  if (!customer) redirect("/login?returnTo=/profile");
+  if (!customer)
+    redirect(
+      `/login?returnTo=/profile&error=${encodeURIComponent("customer_not_found")}`
+    );
 
   const name = [customer.firstName, customer.lastName].filter(Boolean).join(" ");
   const initials =
