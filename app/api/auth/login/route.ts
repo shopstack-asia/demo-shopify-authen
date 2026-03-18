@@ -39,6 +39,25 @@ export async function GET(request: NextRequest) {
 
   try {
     const returnTo = sanitizeReturnTo(new URL(request.url).searchParams.get("returnTo"));
+
+    const originHeader = request.headers.get("origin");
+    const refererHeader = request.headers.get("referer");
+    let origin = "";
+    if (originHeader && typeof originHeader === "string" && originHeader.trim()) {
+      origin = originHeader.trim();
+    } else if (refererHeader) {
+      try {
+        origin = new URL(refererHeader).origin;
+      } catch {
+        // ignore
+      }
+    }
+    if (!origin) {
+      origin = process.env.NEXT_PUBLIC_APP_URL ?? request.url;
+    }
+
+    // Store absolute return URL so we never redirect across hosts.
+    const absoluteReturnTo = `${origin}${returnTo}`;
     const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
     const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
 
@@ -56,7 +75,7 @@ export async function GET(request: NextRequest) {
     session.codeVerifier = codeVerifier;
     session.state = state;
     session.nonce = nonce;
-    session.returnTo = returnTo;
+    session.returnTo = absoluteReturnTo;
     await session.save();
 
     // Use NEXT_PUBLIC_APP_URL as the source of truth for redirect_uri.

@@ -21,6 +21,7 @@ function redirectToLoginWithError(request: NextRequest, errorMessage: string) {
 function sanitizeReturnTo(input: unknown): string {
   const value = typeof input === "string" ? input : "";
   if (!value) return "/profile";
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
   if (value.startsWith("/") && !value.startsWith("//")) return value;
   return "/profile";
 }
