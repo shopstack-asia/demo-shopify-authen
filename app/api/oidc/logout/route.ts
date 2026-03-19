@@ -5,15 +5,21 @@ import { discoverAuthEndpoints } from "@/lib/shopify-auth";
 
 export const runtime = "nodejs";
 
+function extractPostLogoutRedirectUriFromQuery(request: NextRequest): string {
+  const raw = request.nextUrl.searchParams.get("post_logout_redirect_uri");
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
 function redirectToLogin() {
   const issuer = getOidcIssuer();
   const loginUrl = new URL("/login", issuer);
   return NextResponse.redirect(loginUrl.toString(), 302);
 }
 
-export async function POST(request: NextRequest) {
+async function logoutCore(request: NextRequest, postLogoutRedirectUriFromQuery: string) {
   const session = await getSession();
   const idToken = session.idToken;
+
   session.isLoggedIn = false;
   session.accessToken = "";
   session.refreshToken = "";
@@ -30,14 +36,14 @@ export async function POST(request: NextRequest) {
 
   // Only after session is cleared, parse optional post_logout_redirect_uri.
   // Some upstream implementations might not send form-encoded data.
-  let postLogoutRedirectUri = "";
+  let postLogoutRedirectUri = postLogoutRedirectUriFromQuery || "";
   try {
     const formData = await request.formData();
     const postLogoutRedirectUriRaw = formData.get("post_logout_redirect_uri");
-    postLogoutRedirectUri =
-      typeof postLogoutRedirectUriRaw === "string" ? postLogoutRedirectUriRaw.trim() : "";
+    const fromForm = typeof postLogoutRedirectUriRaw === "string" ? postLogoutRedirectUriRaw.trim() : "";
+    if (fromForm) postLogoutRedirectUri = fromForm;
   } catch {
-    postLogoutRedirectUri = "";
+    // ignore (GET requests might not have form body)
   }
 
   if (!postLogoutRedirectUri) {
@@ -50,8 +56,6 @@ export async function POST(request: NextRequest) {
       allowListEnv: "OIDC_POST_LOGOUT_REDIRECT_URIS",
     });
 
-    // Try to terminate upstream session regardless of id_token_hint presence.
-    // Some deployments only clear session if the upstream cookie is present.
     const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
     const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
     if (storeDomain) {
@@ -85,5 +89,15 @@ export async function POST(request: NextRequest) {
       return redirectToLogin();
     }
   }
+}
+
+export async function POST(request: NextRequest) {
+  return logoutCore(request, extractPostLogoutRedirectUriFromQuery(request));
+}
+
+// Some upstream logout implementations call the endpoint as a redirect (GET),
+// so we support GET as well to guarantee session cleanup.
+export async function GET(request: NextRequest) {
+  return logoutCore(request, extractPostLogoutRedirectUriFromQuery(request));
 }
 
