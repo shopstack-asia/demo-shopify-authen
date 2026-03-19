@@ -35,11 +35,9 @@ export async function POST(request: NextRequest) {
     // No need to call cookieStore.delete() separately; maxAge=0 above clears it.
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
-  const postLogoutRedirectUri = `${appUrl.replace(/\/+$/g, "")}/login`;
-
   const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
   const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
+  const postLogoutRedirectUri = storeDomain ? `https://${storeDomain}/` : `${new URL(request.url).origin}/login`;
   if (!storeDomain) {
     return NextResponse.redirect(postLogoutRedirectUri);
   }

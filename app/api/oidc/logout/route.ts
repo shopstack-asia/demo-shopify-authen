@@ -12,6 +12,12 @@ function extractPostLogoutRedirectUriFromQuery(request: NextRequest): string {
 }
 
 function redirectToLogin() {
+  const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
+  const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
+  if (storeDomain) {
+    return NextResponse.redirect(`https://${storeDomain}/`, 302);
+  }
+
   const issuer = getOidcIssuer();
   const loginUrl = new URL("/login", issuer);
   return NextResponse.redirect(loginUrl.toString(), 302);
