@@ -15,7 +15,10 @@ export async function POST(request: NextRequest) {
   session.nonce = "";
   session.state = "";
   session.returnTo = "";
-  session.destroy();
+  session.otpEmail = undefined;
+  session.otpCode = undefined;
+  session.otpExpiry = undefined;
+  await session.destroy();
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
   const postLogoutRedirectUri = `${appUrl.replace(/\/+$/g, "")}/login`;
