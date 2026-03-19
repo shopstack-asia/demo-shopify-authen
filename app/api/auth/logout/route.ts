@@ -24,7 +24,15 @@ export async function POST(request: NextRequest) {
     await session.destroy();
   } finally {
     // Extra safety: ensure the cookie is deleted even if destroy() can't write Set-Cookie.
-    cookies().delete(SESSION_COOKIE_NAME);
+    const cookieStore = cookies();
+    cookieStore.set(SESSION_COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      path: "/",
+    });
+    // No need to call cookieStore.delete() separately; maxAge=0 above clears it.
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;

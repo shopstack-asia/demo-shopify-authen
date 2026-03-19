@@ -37,7 +37,15 @@ async function logoutCore(request: NextRequest, postLogoutRedirectUriFromQuery: 
     await session.destroy();
   } finally {
     // Extra safety: ensure the cookie is deleted even if destroy() can't write Set-Cookie.
-    cookies().delete(SESSION_COOKIE_NAME);
+    const cookieStore = cookies();
+    cookieStore.set(SESSION_COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      path: "/",
+    });
+    // No need to call cookieStore.delete() separately; maxAge=0 above clears it.
   }
 
   // Only after session is cleared, parse optional post_logout_redirect_uri.
