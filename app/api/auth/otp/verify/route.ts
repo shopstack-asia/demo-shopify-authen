@@ -17,11 +17,19 @@ function constantTimeCompareHex(aHex: string, bHex: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+function sanitizeReturnTo(input: unknown): string {
+  const value = typeof input === "string" ? input : "";
+  if (!value) return "/profile";
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  return "/profile";
+}
+
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { email?: unknown; otp?: unknown };
+    const body = (await req.json()) as { email?: unknown; otp?: unknown; returnTo?: unknown };
     const email = typeof body.email === "string" ? body.email.trim() : "";
     const otp = typeof body.otp === "string" ? body.otp.trim() : "";
+    const returnTo = sanitizeReturnTo(body.returnTo);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
@@ -104,10 +112,17 @@ export async function POST(req: Request) {
 
     await session.save();
 
+    // If user was in the OIDC flow (our app as IdP for Shopify), send them back to our
+    // authorize endpoint so we can issue the auth code and redirect to Shopify callback.
+    // Otherwise, start Shopify OAuth login (to get Customer Account API tokens for /profile etc).
+    const isOidcAuthorizeReturn = returnTo.startsWith("/api/oidc/authorize");
+    const redirectUrl = isOidcAuthorizeReturn
+      ? returnTo
+      : `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+
     return NextResponse.json({
       success: true,
-      // After custom OTP verify, start Shopify OAuth login to obtain accessToken.
-      redirectUrl: "/api/auth/login?returnTo=/profile",
+      redirectUrl,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to verify OTP.";

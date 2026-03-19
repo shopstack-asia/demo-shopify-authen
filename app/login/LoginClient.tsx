@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function getAccentClasses() {
@@ -27,15 +27,27 @@ function formatSeconds(seconds: number): string {
   return s.toString().padStart(2, "0");
 }
 
+function getLoginHintEmail(returnTo: string, searchParams: URLSearchParams): string {
+  const direct = searchParams.get("login_hint");
+  if (direct && direct.trim()) return decodeURIComponent(direct.trim());
+  try {
+    const url = new URL(returnTo, typeof window !== "undefined" ? window.location.origin : "https://localhost");
+    const hint = url.searchParams.get("login_hint");
+    return hint ? decodeURIComponent(hint.trim()) : "";
+  } catch {
+    return "";
+  }
+}
+
 export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") ?? "/profile";
   const error = searchParams.get("error");
 
-  const [redirecting, setRedirecting] = useState(false);
+  const loginHintEmail = useMemo(() => getLoginHintEmail(returnTo, searchParams), [returnTo, searchParams]);
   const [otpStep, setOtpStep] = useState<OTPStep>("email");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(loginHintEmail);
   const [otp, setOtp] = useState("");
   const [maskedEmail, setMaskedEmail] = useState<string | null>(null);
   const [debugOtp, setDebugOtp] = useState<string | null>(null);
@@ -45,16 +57,17 @@ export default function LoginClient() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const appliedLoginHint = useRef(false);
 
   const accent = useMemo(() => getAccentClasses(), []);
-
-  function onLogin() {
-    setRedirecting(true);
-    const url = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
-    window.location.href = url;
-  }
-
   const canResend = secondsLeft <= 0;
+
+  useEffect(() => {
+    if (loginHintEmail && !appliedLoginHint.current) {
+      setEmail(loginHintEmail);
+      appliedLoginHint.current = true;
+    }
+  }, [loginHintEmail]);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -124,7 +137,7 @@ export default function LoginClient() {
       const res = await fetch("/api/auth/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, otp: otp.trim() }),
+        body: JSON.stringify({ email: normalizedEmail, otp: otp.trim(), returnTo }),
       });
 
       const rawText = await res.text().catch(() => "");
@@ -143,7 +156,8 @@ export default function LoginClient() {
       }
 
       const redirectUrl = data.redirectUrl ?? "/profile";
-      if (redirectUrl.startsWith("/api/auth/login")) {
+      // Full page navigation so server 302 (e.g. OIDC → Shopify callback) is followed
+      if (redirectUrl.startsWith("/api/") || redirectUrl.startsWith("http")) {
         window.location.href = redirectUrl;
       } else {
         router.push(redirectUrl);
@@ -188,48 +202,6 @@ export default function LoginClient() {
               {error}
             </div>
           ) : null}
-
-          <button
-            type="button"
-            onClick={onLogin}
-            disabled={redirecting}
-            className={`w-full rounded-xl ${accent.button} font-semibold py-3 px-4 flex items-center justify-center gap-2 transition disabled:opacity-60 disabled:cursor-not-allowed ${accent.ring} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0e17]`}
-          >
-            {redirecting ? (
-              <>
-                <svg
-                  className="animate-spin h-5 w-5"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  aria-hidden
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                Redirecting…
-              </>
-            ) : (
-              "Login with Shopify"
-            )}
-          </button>
-
-          <div className="mt-6 flex items-center gap-3 text-center text-xs text-slate-400">
-            <div className="flex-1 h-px bg-white/10" />
-            <span>or</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
 
           <div className="mt-4">
             {/* OTP step: email */}

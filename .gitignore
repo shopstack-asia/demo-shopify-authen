@@ -8,3 +8,8 @@ node_modules/
 
 # Next.js
 .next/
+
+# OIDC signing keys (never commit)
+.oidc-key.json
+.oidc-private.pem
+.oidc-public.pem
