@@ -66,6 +66,8 @@ export async function POST(req: Request) {
 
     const resendApiKey = await requireEnv("RESEND_API_KEY");
     const resendFromEmail = await requireEnv("RESEND_FROM_EMAIL");
+    // Note: With from = onboarding@resend.dev, Resend only delivers to the email you signed up with.
+    // To send OTP to any customer, verify your own domain in Resend and set RESEND_FROM_EMAIL to e.g. noreply@yourdomain.com.
 
     const resend = new Resend(resendApiKey);
 

@@ -66,9 +66,12 @@ export async function getCustomerByEmailFromAdmin(email: string): Promise<AdminC
   const normalizedEmail = email.trim();
   if (!normalizedEmail) return null;
 
+  // Shopify search syntax: exact email match requires email:"..."
+  const searchQuery = `email:"${normalizedEmail.replace(/"/g, '\\"')}"`;
+
   const query = `
-    query GetCustomerByEmail($email: String!) {
-      customers(first: 1, query: $email) {
+    query GetCustomerByEmail($query: String!) {
+      customers(first: 1, query: $query) {
         edges {
           node {
             id
@@ -92,7 +95,7 @@ export async function getCustomerByEmailFromAdmin(email: string): Promise<AdminC
         } | null;
       }>;
     };
-  }>(query, { email: normalizedEmail });
+  }>(query, { query: searchQuery });
 
   const edge = data.customers.edges[0];
   const node = edge?.node ?? null;

@@ -112,13 +112,9 @@ export async function POST(req: Request) {
 
     await session.save();
 
-    // If user was in the OIDC flow (our app as IdP for Shopify), send them back to our
-    // authorize endpoint so we can issue the auth code and redirect to Shopify callback.
-    // Otherwise, start Shopify OAuth login (to get Customer Account API tokens for /profile etc).
-    const isOidcAuthorizeReturn = returnTo.startsWith("/api/oidc/authorize");
-    const redirectUrl = isOidcAuthorizeReturn
-      ? returnTo
-      : `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+    // Redirect to the original target directly and keep the existing session cookie so
+    // user can open /profile via direct URL without re-auth flow.
+    const redirectUrl = returnTo;
 
     return NextResponse.json({
       success: true,
