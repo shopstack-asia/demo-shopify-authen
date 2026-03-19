@@ -37,16 +37,19 @@ export async function createIdToken(params: {
   const exp = now + ttlSeconds;
 
   // id_token payload: iss, sub, aud, email, exp, iat; nonce when provided; auth_time; at_hash when access_token provided
-  const payload: Record<string, string | number> = { email: params.email, auth_time: now };
+  const payload: Record<string, string | number | boolean> = {
+    email: params.email,
+    email_verified: true,
+    auth_time: now,
+  };
   if (params.nonce) payload.nonce = params.nonce;
   if (params.accessToken) payload.at_hash = atHash(params.accessToken);
 
-  const aud = Array.isArray(params.aud) ? params.aud : [params.aud];
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: "RS256", kid, typ: "JWT" })
     .setIssuer(issuer)
     .setSubject(params.sub)
-    .setAudience(aud)
+    .setAudience(params.aud)
     .setIssuedAt(now)
     .setExpirationTime(new Date(exp * 1000))
     .sign(privateKey);

@@ -63,8 +63,9 @@ export async function GET(request: NextRequest) {
     return redirectToLogin(request, returnTo);
   }
 
+  // Use email as sub — Shopify rejects its own GID format (gid://shopify/Customer/...) as external IDP subject
   const code = createAuthorizationCode({
-    sub: user.sub,
+    sub: user.email,
     email: user.email,
     clientId,
     redirectUri,
