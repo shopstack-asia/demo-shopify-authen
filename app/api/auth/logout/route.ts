@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { cookies } from "next/headers";
+import { getSession, SESSION_COOKIE_NAME } from "@/lib/session";
 import { discoverAuthEndpoints } from "@/lib/shopify-auth";
 
 export async function POST(request: NextRequest) {
@@ -19,7 +20,12 @@ export async function POST(request: NextRequest) {
   session.otpEmail = undefined;
   session.otpCode = undefined;
   session.otpExpiry = undefined;
-  await session.destroy();
+  try {
+    await session.destroy();
+  } finally {
+    // Extra safety: ensure the cookie is deleted even if destroy() can't write Set-Cookie.
+    cookies().delete(SESSION_COOKIE_NAME);
+  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
   const postLogoutRedirectUri = `${appUrl.replace(/\/+$/g, "")}/login`;

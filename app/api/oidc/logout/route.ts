@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOidcIssuer, validateRedirectUriOrThrow } from "@/lib/oidc/client";
-import { getSession } from "@/lib/session";
+import { cookies } from "next/headers";
+import { getSession, SESSION_COOKIE_NAME } from "@/lib/session";
 import { discoverAuthEndpoints } from "@/lib/shopify-auth";
 
 export const runtime = "nodejs";
@@ -32,7 +33,12 @@ async function logoutCore(request: NextRequest, postLogoutRedirectUriFromQuery: 
   session.otpEmail = undefined;
   session.otpCode = undefined;
   session.otpExpiry = undefined;
-  await session.destroy();
+  try {
+    await session.destroy();
+  } finally {
+    // Extra safety: ensure the cookie is deleted even if destroy() can't write Set-Cookie.
+    cookies().delete(SESSION_COOKIE_NAME);
+  }
 
   // Only after session is cleared, parse optional post_logout_redirect_uri.
   // Some upstream implementations might not send form-encoded data.
