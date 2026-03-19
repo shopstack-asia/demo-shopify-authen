@@ -47,8 +47,14 @@ export async function GET(request: NextRequest) {
     return redirectToLoginWithError(request, "Missing code");
   }
 
-  if (!stateParam || !session.state || stateParam !== session.state) {
-    return redirectToLoginWithError(request, "Invalid state");
+  if (!stateParam) {
+    return redirectToLoginWithError(request, "Missing state");
+  }
+  if (!session.state) {
+    return redirectToLoginWithError(request, "Missing session.state");
+  }
+  if (stateParam !== session.state) {
+    return redirectToLoginWithError(request, "State mismatch");
   }
 
   try {
