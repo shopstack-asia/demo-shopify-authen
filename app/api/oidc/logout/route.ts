@@ -43,17 +43,16 @@ export async function POST(request: NextRequest) {
       allowListEnv: "OIDC_POST_LOGOUT_REDIRECT_URIS",
     });
 
-    // If we still have a Shopify OIDC id_token, try to terminate the upstream session too.
-    if (idToken) {
-      const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
-      const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
-      if (storeDomain) {
-        const endpoints = await discoverAuthEndpoints(storeDomain);
-        const endUrl = new URL(endpoints.end_session_endpoint);
-        endUrl.searchParams.set("id_token_hint", idToken);
-        endUrl.searchParams.set("post_logout_redirect_uri", redirectUri);
-        return NextResponse.redirect(endUrl, 302);
-      }
+    // Try to terminate upstream session regardless of id_token_hint presence.
+    // Some deployments only clear session if the upstream cookie is present.
+    const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
+    const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
+    if (storeDomain) {
+      const endpoints = await discoverAuthEndpoints(storeDomain);
+      const endUrl = new URL(endpoints.end_session_endpoint);
+      if (idToken) endUrl.searchParams.set("id_token_hint", idToken);
+      endUrl.searchParams.set("post_logout_redirect_uri", redirectUri);
+      return NextResponse.redirect(endUrl.toString(), 302);
     }
 
     return NextResponse.redirect(new URL(redirectUri).toString(), 302);
@@ -64,16 +63,14 @@ export async function POST(request: NextRequest) {
         allowListEnv: "OIDC_REDIRECT_URIS",
       });
 
-      if (idToken) {
-        const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
-        const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
-        if (storeDomain) {
-          const endpoints = await discoverAuthEndpoints(storeDomain);
-          const endUrl = new URL(endpoints.end_session_endpoint);
-          endUrl.searchParams.set("id_token_hint", idToken);
-          endUrl.searchParams.set("post_logout_redirect_uri", redirectUri);
-          return NextResponse.redirect(endUrl, 302);
-        }
+      const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
+      const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
+      if (storeDomain) {
+        const endpoints = await discoverAuthEndpoints(storeDomain);
+        const endUrl = new URL(endpoints.end_session_endpoint);
+        if (idToken) endUrl.searchParams.set("id_token_hint", idToken);
+        endUrl.searchParams.set("post_logout_redirect_uri", redirectUri);
+        return NextResponse.redirect(endUrl.toString(), 302);
       }
 
       return NextResponse.redirect(new URL(redirectUri).toString(), 302);
