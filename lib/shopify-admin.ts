@@ -130,8 +130,6 @@ function toCustomerOrder(order: {
   id: string;
   name?: string | null;
   processedAt?: string | null;
-  financialStatus?: string | null;
-  fulfillmentStatus?: string | null;
   totalPriceSet?: { shopMoney?: { amount?: string | null; currencyCode?: string | null } | null } | null;
   lineItems?: { nodes?: Array<unknown> | null } | null;
 }): ShopifyCustomerOrder {
@@ -158,8 +156,6 @@ function toCustomerOrder(order: {
     id: order.id,
     number: Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : null,
     processedAt: order.processedAt ?? null,
-    financialStatus: order.financialStatus ?? null,
-    fulfillmentStatus: order.fulfillmentStatus ?? null,
     totalPrice,
     lineItems: { nodes: mappedLines },
   };
@@ -188,8 +184,10 @@ function toCustomerAddress(address: {
 }
 
 export async function getCustomerProfileFromAdmin(customerId: string): Promise<ShopifyCustomerProfile> {
-  const query = `
-    query GetCustomerProfile($id: ID!) {
+  // Admin API scopes might not allow `orders` for the configured token.
+  // If that happens, we still want profile + addresses to work.
+  const customerBasicsQuery = `
+    query GetCustomerBasics($id: ID!) {
       customer(id: $id) {
         id
         firstName
@@ -207,47 +205,20 @@ export async function getCustomerProfileFromAdmin(customerId: string): Promise<S
           phone
         }
         addresses(first: 5) {
-          nodes {
-            id
-            address1
-            address2
-            city
-            province
-            country
-            zip
-            phone
-          }
-        }
-        orders(first: 10, sortKey: PROCESSED_AT, reverse: true) {
-          nodes {
-            id
-            name
-            processedAt
-            financialStatus
-            fulfillmentStatus
-            totalPriceSet {
-              shopMoney {
-                amount
-                currencyCode
-              }
-            }
-            lineItems(first: 5) {
-              nodes {
-                title
-                quantity
-                image {
-                  url
-                  altText
-                }
-              }
-            }
-          }
+          id
+          address1
+          address2
+          city
+          province
+          country
+          zip
+          phone
         }
       }
     }
   `;
 
-  const data = await shopifyAdminFetch<{
+  const basicsData = await shopifyAdminFetch<{
     customer: {
       id: string;
       firstName: string | null;
@@ -264,74 +235,129 @@ export async function getCustomerProfileFromAdmin(customerId: string): Promise<S
         zip: string | null;
         phone: string | null;
       } | null;
-      addresses: {
-        nodes: Array<{
-          id: string;
-          address1: string | null;
-          address2: string | null;
-          city: string | null;
-          province: string | null;
-          country: string | null;
-          zip: string | null;
-          phone: string | null;
-        }>;
-      } | null;
-      orders: {
-        nodes: Array<{
-          id: string;
-          name: string | null;
-          processedAt: string | null;
-          financialStatus: string | null;
-          fulfillmentStatus: string | null;
-          totalPriceSet: {
-            shopMoney: {
-              amount: string | null;
-              currencyCode: string | null;
-            } | null;
-          } | null;
-          lineItems: {
+      // Depending on the Admin GraphQL schema, this may be either a connection (with `nodes`)
+      // or a list-like collection.
+      addresses:
+        | Array<{
+            id: string;
+            address1: string | null;
+            address2: string | null;
+            city: string | null;
+            province: string | null;
+            country: string | null;
+            zip: string | null;
+            phone: string | null;
+          }>
+        | {
             nodes: Array<{
-              title: string | null;
-              quantity: number | null;
-              image: { url: string | null; altText: string | null } | null;
+              id: string;
+              address1: string | null;
+              address2: string | null;
+              city: string | null;
+              province: string | null;
+              country: string | null;
+              zip: string | null;
+              phone: string | null;
             }>;
-          } | null;
-        }>;
-      } | null;
+          }
+        | null;
     } | null;
-  }>(query, { id: customerId });
+  }>(customerBasicsQuery, { id: customerId });
 
-  const customer = data.customer;
+  const customer = basicsData.customer;
   if (!customer) {
     throw new Error("Customer not found in Admin API.");
   }
 
   const defaultAddress = customer.defaultAddress ? toCustomerAddress(customer.defaultAddress) : null;
-  const addresses =
-    customer.addresses?.nodes && Array.isArray(customer.addresses.nodes)
-      ? customer.addresses.nodes.map((a) => toCustomerAddress(a))
-      : [];
+  const addressList = Array.isArray(customer.addresses)
+    ? customer.addresses
+    : (customer.addresses as { nodes?: unknown } | null)?.nodes;
+  const addresses = Array.isArray(addressList) ? addressList.map((a) => toCustomerAddress(a)) : [];
 
-  const orders =
-    customer.orders?.nodes && Array.isArray(customer.orders.nodes)
-      ? customer.orders.nodes.map((o) =>
-          toCustomerOrder({
-            id: o.id,
-            name: o.name ?? null,
-            processedAt: o.processedAt ?? null,
-            financialStatus: o.financialStatus ?? null,
-            fulfillmentStatus: o.fulfillmentStatus ?? null,
-            totalPriceSet: o.totalPriceSet ?? null,
-            lineItems: o.lineItems
-              ? {
-                  nodes: o.lineItems.nodes ?? null,
+  // Fetch orders separately so "Access denied for orders field" doesn't break the whole profile.
+  let orders: ShopifyCustomerOrder[] = [];
+  try {
+    const ordersQuery = `
+      query GetCustomerOrders($id: ID!) {
+        customer(id: $id) {
+          orders(first: 10, sortKey: PROCESSED_AT, reverse: true) {
+            nodes {
+              id
+              name
+              processedAt
+              totalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
                 }
-              : null,
-          })
-        )
-      : [];
+              }
+              lineItems(first: 5) {
+                nodes {
+                  title
+                  quantity
+                  image {
+                    url
+                    altText
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
 
-  const profile: ShopifyCustomerProfile = {
+    const ordersData = await shopifyAdminFetch<{
+      customer: {
+        orders: {
+          nodes: Array<{
+            id: string;
+            name: string | null;
+            processedAt: string | null;
+            totalPriceSet: {
+              shopMoney: { amount: string | null; currencyCode: string | null } | null;
+            } | null;
+            lineItems: {
+              nodes: Array<{
+                title: string | null;
+                quantity: number | null;
+                image: { url: string | null; altText: string | null } | null;
+              }>;
+            } | null;
+          }>;
+        } | null;
+      } | null;
+    }>(ordersQuery, { id: customerId });
+
+    const orderNodes = ordersData.customer?.orders?.nodes ?? [];
+    if (Array.isArray(orderNodes)) {
+      orders = orderNodes.map((o) =>
+        toCustomerOrder({
+          id: o.id,
+          name: o.name ?? null,
+          processedAt: o.processedAt ?? null,
+          totalPriceSet: o.totalPriceSet ?? null,
+          lineItems: o.lineItems
+            ? {
+                nodes: o.lineItems.nodes ?? null,
+              }
+            : null,
+        })
+      );
+    }
+  } catch (err) {
+    // If the configured token can't read orders, just omit order history.
+    const message = err instanceof Error ? err.message : "";
+    if (message.includes("ACCESS_DENIED") || message.toLowerCase().includes("access denied")) {
+      orders = [];
+    } else {
+      // For unexpected errors, rethrow so you notice real issues.
+      throw err;
+    }
+  }
+
+  return {
     customer: {
       id: customer.id,
       firstName: customer.firstName ?? "",
@@ -343,7 +369,5 @@ export async function getCustomerProfileFromAdmin(customerId: string): Promise<S
       orders: { nodes: orders },
     },
   };
-
-  return profile;
 }
 

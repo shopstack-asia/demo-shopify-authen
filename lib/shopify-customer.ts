@@ -2,7 +2,9 @@
  * Shopify Customer Account API GraphQL client.
  */
 
-const CUSTOMER_ACCOUNT_API_VERSION = "2026-01";
+// Use the "latest" schema to avoid mismatches between API versions.
+// (Shopify Customer Account API is versioned and schema fields can change.)
+const CUSTOMER_ACCOUNT_API_VERSION = "latest";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -68,8 +70,9 @@ export interface ShopifyCustomerProfile {
  * Requires an access token prefixed with `shcat_`.
  */
 export async function getCustomerProfile(accessToken: string): Promise<ShopifyCustomerProfile> {
-  const shopId = requireEnv("SHOPIFY_SHOP_ID");
-  const url = `https://shopify.com/${shopId}/account/customer/api/${CUSTOMER_ACCOUNT_API_VERSION}/graphql`;
+  const storeDomain = requireEnv("SHOPIFY_MYSHOPIFY_DOMAIN");
+  // Customer Account API GraphQL endpoint (headless storefront format).
+  const url = `https://${storeDomain}/api/${CUSTOMER_ACCOUNT_API_VERSION}/graphql.json`;
 
   const query = `
     query GetCustomerProfile {
