@@ -24,10 +24,13 @@ export async function POST(req: Request) {
     const otp = typeof body.otp === "string" ? body.otp.trim() : "";
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ success: false, error: "อีเมลไม่ถูกต้อง" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
     }
     if (!/^\d{6}$/.test(otp)) {
-      return NextResponse.json({ success: false, error: "OTP ต้องเป็นตัวเลข 6 หลัก" }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "OTP must be a 6-digit number" },
+        { status: 401 }
+      );
     }
 
     const session = await getSession();
@@ -39,7 +42,7 @@ export async function POST(req: Request) {
     // Validate OTP present in session.
     if (!otpEmail || !otpCode || typeof otpExpiry !== "number") {
       return NextResponse.json(
-        { success: false, error: "OTP ไม่ถูกต้องหรือหมดอายุ" },
+        { success: false, error: "Invalid or expired OTP" },
         { status: 401 }
       );
     }
@@ -47,7 +50,7 @@ export async function POST(req: Request) {
     const normalizedEmail = email.toLowerCase();
     if (normalizedEmail !== otpEmail.toLowerCase()) {
       return NextResponse.json(
-        { success: false, error: "OTP ไม่ถูกต้องหรือหมดอายุ" },
+        { success: false, error: "Invalid or expired OTP" },
         { status: 401 }
       );
     }
@@ -60,7 +63,7 @@ export async function POST(req: Request) {
       await session.save();
 
       return NextResponse.json(
-        { success: false, error: "OTP หมดอายุแล้ว" },
+        { success: false, error: "OTP has expired" },
         { status: 401 }
       );
     }
@@ -69,7 +72,7 @@ export async function POST(req: Request) {
     const isValid = constantTimeCompareHex(otpCode, otpHashed);
     if (!isValid) {
       return NextResponse.json(
-        { success: false, error: "OTP ไม่ถูกต้อง" },
+        { success: false, error: "Invalid OTP" },
         { status: 401 }
       );
     }
@@ -78,7 +81,7 @@ export async function POST(req: Request) {
     if (!customer) {
       // OTP was for an email that existed at send time; treat missing customer as failure.
       return NextResponse.json(
-        { success: false, error: "ไม่พบบัญชีผู้ใช้ในระบบ" },
+        { success: false, error: "Account not found in the system" },
         { status: 401 }
       );
     }

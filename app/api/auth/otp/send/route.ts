@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     const email = typeof body.email === "string" ? body.email.trim() : "";
 
     if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ success: false, error: "อีเมลไม่ถูกต้อง" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
     }
 
     // TODO: add rate limit per email + IP to prevent abuse.
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     const customer = await getCustomerByEmailFromAdmin(email);
     if (!customer) {
       return NextResponse.json(
-        { success: false, error: "อีเมลนี้ไม่มีในระบบ" },
+        { success: false, error: "Email is not in the system" },
         { status: 400 }
       );
     }
@@ -73,13 +73,13 @@ export async function POST(req: Request) {
     await resend.emails.send({
       from: resendFromEmail,
       to: email,
-      subject: "รหัส OTP สำหรับเข้าสู่ระบบ",
+      subject: "OTP code for login",
       html: `
         <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-          <h2>รหัส OTP ของคุณ</h2>
+          <h2>Your OTP code</h2>
           <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #000;">${otp}</p>
-          <p>รหัสนี้จะหมดอายุใน <strong>10 นาที</strong></p>
-          <p style="color: #666; font-size: 12px;">หากคุณไม่ได้ทำรายการนี้ กรุณาเพิกเฉย</p>
+          <p>This code will expire in <strong>10 minutes</strong></p>
+          <p style="color: #666; font-size: 12px;">If you didn’t request this, please ignore.</p>
         </div>
       `,
     });

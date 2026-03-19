@@ -70,7 +70,7 @@ export default function LoginClient() {
 
     const normalizedEmail = email.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setFormError("กรุณากรอกอีเมลให้ถูกต้อง");
+      setFormError("Please enter a valid email");
       return;
     }
 
@@ -94,7 +94,7 @@ export default function LoginClient() {
         const fallback = rawText
           ? rawText.replace(/\s+/g, " ").slice(0, 220)
           : `HTTP ${res.status} ${res.statusText}`;
-        throw new Error(data.error ?? fallback ?? "ส่ง OTP ไม่สำเร็จ");
+        throw new Error(data.error ?? fallback ?? "Failed to send OTP");
       }
 
       setOtpStep("otp");
@@ -103,7 +103,7 @@ export default function LoginClient() {
       setSecondsLeft(60);
       setDebugOtp(typeof data.debugOtp === "string" ? data.debugOtp : null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "ส่ง OTP ไม่สำเร็จ";
+      const message = err instanceof Error ? err.message : "Failed to send OTP";
       setFormError(message);
     } finally {
       setSendLoading(false);
@@ -115,7 +115,7 @@ export default function LoginClient() {
     const normalizedEmail = email.trim();
 
     if (!/^\d{6}$/.test(otp.trim())) {
-      setFormError("OTP ต้องเป็นตัวเลข 6 หลัก");
+      setFormError("OTP must be a 6-digit number");
       return;
     }
 
@@ -139,7 +139,7 @@ export default function LoginClient() {
         const fallback = rawText
           ? rawText.replace(/\s+/g, " ").slice(0, 220)
           : `HTTP ${res.status} ${res.statusText}`;
-        throw new Error(data.error ?? fallback ?? "รหัส OTP ไม่ถูกต้อง");
+        throw new Error(data.error ?? fallback ?? "Invalid OTP");
       }
 
       const redirectUrl = data.redirectUrl ?? "/profile";
@@ -149,7 +149,7 @@ export default function LoginClient() {
         router.push(redirectUrl);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "รหัส OTP ไม่ถูกต้อง";
+      const message = err instanceof Error ? err.message : "Invalid OTP";
       setFormError(message);
     } finally {
       setVerifyLoading(false);
@@ -227,7 +227,7 @@ export default function LoginClient() {
 
           <div className="mt-6 flex items-center gap-3 text-center text-xs text-slate-400">
             <div className="flex-1 h-px bg-white/10" />
-            <span>หรือ</span>
+            <span>or</span>
             <div className="flex-1 h-px bg-white/10" />
           </div>
 
@@ -257,7 +257,7 @@ export default function LoginClient() {
                 disabled={sendLoading}
                 className={`mt-3 w-full rounded-xl ${accent.button} font-semibold py-3 px-4 flex items-center justify-center transition disabled:opacity-60 disabled:cursor-not-allowed`}
               >
-                {sendLoading ? "กำลังส่งรหัส..." : "รับรหัส OTP"}
+                {sendLoading ? "Sending OTP..." : "Get OTP"}
               </button>
 
               {formError ? (
@@ -274,7 +274,7 @@ export default function LoginClient() {
               }`}
             >
               <div className="text-sm text-slate-400 mb-2">
-                ส่งรหัสไปที่{" "}
+                Sent code to{" "}
                 <span className="text-slate-200 font-medium">{maskedEmail ?? "your email"}</span>
               </div>
 
@@ -307,7 +307,7 @@ export default function LoginClient() {
                 disabled={verifyLoading}
                 className={`mt-3 w-full rounded-xl ${accent.button} font-semibold py-3 px-4 flex items-center justify-center transition disabled:opacity-60 disabled:cursor-not-allowed`}
               >
-                {verifyLoading ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}
+                {verifyLoading ? "Verifying..." : "Sign in"}
               </button>
 
               <div className="mt-3 flex items-center justify-between gap-3">
@@ -319,7 +319,7 @@ export default function LoginClient() {
                     canResend ? "text-amber-300 hover:text-amber-200" : "text-slate-500 cursor-not-allowed decoration-slate-600"
                   }`}
                 >
-                  {canResend ? "ส่งรหัสใหม่" : `ส่งรหัสใหม่ใน ${formatSeconds(secondsLeft)} วิ`}
+                  {canResend ? "Resend code" : `Resend in ${formatSeconds(secondsLeft)} sec`}
                 </button>
               </div>
 
