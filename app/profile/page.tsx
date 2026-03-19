@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getCustomerProfile } from "@/lib/shopify-customer";
+import { getCustomerProfileFromAdmin } from "@/lib/shopify-admin";
 import type { ShopifyCustomerAddress, ShopifyCustomerOrder } from "@/lib/shopify-customer";
 import LogoutButton from "./LogoutButton";
 
@@ -101,10 +102,12 @@ function classifyProfileFetchError(err: unknown): string {
 
 async function ProfileContent() {
   const session = await getSession();
-  if (!session.isLoggedIn || !session.accessToken) {
+  const hasCustomerAccountAccessToken = Boolean(session.accessToken);
+  const hasCustomerId = Boolean(session.customerId);
+  if (!session.isLoggedIn || (!hasCustomerAccountAccessToken && !hasCustomerId)) {
     const reason = !session.isLoggedIn
       ? "session_not_logged_in"
-      : !session.accessToken
+      : !hasCustomerAccountAccessToken
         ? "access_token_missing"
         : "session_invalid";
     redirect(`/login?returnTo=/profile&error=${encodeURIComponent(reason)}`);
@@ -122,7 +125,9 @@ async function ProfileContent() {
   };
 
   try {
-    const profile = await getCustomerProfile(session.accessToken);
+    const profile = hasCustomerAccountAccessToken
+      ? await getCustomerProfile(session.accessToken)
+      : await getCustomerProfileFromAdmin(session.customerId);
     customer = profile.customer;
   } catch (err) {
     redirect(

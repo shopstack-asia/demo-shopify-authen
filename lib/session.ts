@@ -11,6 +11,12 @@ export interface SessionData {
   codeVerifier: string; // cleared after exchange
   returnTo: string;
   isLoggedIn: boolean;
+
+  // Custom email OTP login (Admin API + Resend)
+  email?: string; // customer email after successful OTP verify
+  otpEmail?: string; // email used to request OTP
+  otpCode?: string; // SHA256 hash (hex) of OTP code
+  otpExpiry?: number; // unix ms timestamp
 }
 
 const defaultSession: SessionData = {
