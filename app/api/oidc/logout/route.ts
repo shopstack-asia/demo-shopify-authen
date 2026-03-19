@@ -12,11 +12,6 @@ function redirectToLogin() {
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
-  const postLogoutRedirectUriRaw = formData.get("post_logout_redirect_uri");
-  const postLogoutRedirectUri =
-    typeof postLogoutRedirectUriRaw === "string" ? postLogoutRedirectUriRaw.trim() : "";
-
   const session = await getSession();
   const idToken = session.idToken;
   session.isLoggedIn = false;
@@ -32,6 +27,18 @@ export async function POST(request: NextRequest) {
   session.otpCode = undefined;
   session.otpExpiry = undefined;
   await session.destroy();
+
+  // Only after session is cleared, parse optional post_logout_redirect_uri.
+  // Some upstream implementations might not send form-encoded data.
+  let postLogoutRedirectUri = "";
+  try {
+    const formData = await request.formData();
+    const postLogoutRedirectUriRaw = formData.get("post_logout_redirect_uri");
+    postLogoutRedirectUri =
+      typeof postLogoutRedirectUriRaw === "string" ? postLogoutRedirectUriRaw.trim() : "";
+  } catch {
+    postLogoutRedirectUri = "";
+  }
 
   if (!postLogoutRedirectUri) {
     return redirectToLogin();
