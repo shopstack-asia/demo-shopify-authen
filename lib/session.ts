@@ -74,3 +74,7 @@ export async function unsealSession(cookieValue: string | undefined): Promise<Se
 
 export { defaultSession, sessionOptions };
 export const SESSION_COOKIE_NAME = sessionOptions.cookieName;
+
+// Used to allow internal redirects to `/login` without relying on referer headers.
+// When users try to open `/login` directly, this cookie won't be present and the page will be blocked.
+export const LOGIN_PAGE_INTERNAL_COOKIE_NAME = "login_page_internal";

@@ -109,6 +109,78 @@ export async function getCustomerByEmailFromAdmin(email: string): Promise<AdminC
     : null;
 }
 
+function normalizePhoneForLookup(rawPhone: string): string {
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return "";
+  // Keep leading '+' (if present), strip everything else to digits.
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
+  }
+  return trimmed.replace(/\D/g, "");
+}
+
+export async function getCustomerByPhoneFromAdmin(phone: string): Promise<AdminCustomerLookup> {
+  const normalized = normalizePhoneForLookup(phone);
+  if (!normalized) return null;
+
+  const digits = normalized.startsWith("+") ? normalized.slice(1) : normalized;
+  if (!digits) return null;
+
+  // Shopify's "phone" field matching can be tokenized; try a few common representations.
+  const candidates = new Set<string>();
+  candidates.add(digits);
+  candidates.add(`+${digits}`);
+  if (digits.length > 10) {
+    candidates.add(digits.slice(-10));
+    candidates.add(`+${digits.slice(-10)}`);
+  }
+
+  const query = `
+    query GetCustomerByPhone($query: String!) {
+      customers(first: 1, query: $query) {
+        edges {
+          node {
+            id
+            firstName
+            email
+            state
+          }
+        }
+      }
+    }
+  `;
+
+  for (const candidate of Array.from(candidates)) {
+    const searchQuery = `phone:"${candidate.replace(/"/g, '\\"')}"`;
+    const data = await shopifyAdminFetch<{
+      customers: {
+        edges: Array<{
+          node?: {
+            id: string;
+            firstName?: string | null;
+            email?: string | null;
+            state?: string | null;
+          } | null;
+        }>;
+      };
+    }>(query, { query: searchQuery });
+
+    const edge = data.customers.edges[0];
+    const node = edge?.node ?? null;
+    if (!node) continue;
+
+    return {
+      id: node.id,
+      firstName: node.firstName ?? null,
+      email: node.email ?? null,
+      state: node.state ?? null,
+    };
+  }
+
+  return null;
+}
+
 function toCustomerOrderLineItem(line: {
   title?: string | null;
   quantity?: number | null;

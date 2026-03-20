@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { randomInt, createHash } from "crypto";
-import { Resend } from "resend";
 import { getSession } from "@/lib/session";
-import { getCustomerByEmailFromAdmin } from "@/lib/shopify-admin";
+import { getCustomerByEmailFromAdmin, getCustomerByPhoneFromAdmin } from "@/lib/shopify-admin";
+import { sendOtpEmail, sendOtpSms } from "@/lib/otp";
 
 export const runtime = "nodejs";
 
@@ -11,36 +11,76 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function normalizePhone(rawPhone: string): string {
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return "";
+  // Keep leading '+' (if present), strip everything else to digits.
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
+  }
+  return trimmed.replace(/\D/g, "");
+}
+
+function isValidPhone(phone: string): boolean {
+  const normalized = normalizePhone(phone);
+  const digits = normalized.startsWith("+") ? normalized.slice(1) : normalized;
+  return /^\d{8,15}$/.test(digits);
+}
+
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-async function requireEnv(name: string): Promise<string> {
-  const value = process.env[name];
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`Missing required env var: ${name}`);
-  }
-  return value.trim();
-}
-
 export async function POST(req: Request) {
-  let stage: "admin_lookup" | "resend_send" = "admin_lookup";
+  let stage: "admin_lookup" | "resend_send" | "sms_send" = "admin_lookup";
   try {
-    const body = (await req.json()) as { email?: unknown };
-    const email = typeof body.email === "string" ? body.email.trim() : "";
+    const body = (await req.json()) as { identifier?: unknown; email?: unknown; phone?: unknown };
+    const identifier = typeof body.identifier === "string" ? body.identifier.trim() : "";
+    const emailFromBody = typeof body.email === "string" ? body.email.trim() : "";
+    const phoneFromBody = typeof body.phone === "string" ? body.phone.trim() : "";
 
-    if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
+    const candidate = emailFromBody || identifier || phoneFromBody;
+    if (!candidate) {
+      return NextResponse.json({ success: false, error: "Invalid email or phone" }, { status: 400 });
+    }
+
+    const inputIsEmail = Boolean(emailFromBody) || isValidEmail(candidate);
+    const email = inputIsEmail ? candidate : "";
+    const phone = !inputIsEmail ? candidate : "";
+    const normalizedPhone = phone ? normalizePhone(phone) : "";
+
+    if (inputIsEmail) {
+      if (!isValidEmail(email)) {
+        return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
+      }
+    } else {
+      if (!normalizedPhone || !isValidPhone(phone)) {
+        return NextResponse.json({ success: false, error: "Invalid email or phone" }, { status: 400 });
+      }
     }
 
     // TODO: add rate limit per email + IP to prevent abuse.
 
     const session = await getSession();
 
-    const customer = await getCustomerByEmailFromAdmin(email);
+    const customer = inputIsEmail
+      ? await getCustomerByEmailFromAdmin(email)
+      : await getCustomerByPhoneFromAdmin(normalizedPhone);
     if (!customer) {
       return NextResponse.json(
-        { success: false, error: "Email is not in the system" },
+        {
+          success: false,
+          error: inputIsEmail ? "Email is not in the system" : "Phone number is not in the system",
+        },
+        { status: 400 }
+      );
+    }
+
+    const destinationEmail = inputIsEmail ? email.toLowerCase() : (customer.email ?? "").toLowerCase();
+    if (!destinationEmail) {
+      return NextResponse.json(
+        { success: false, error: "Phone number has no email associated in the system" },
         { status: 400 }
       );
     }
@@ -57,38 +97,27 @@ export async function POST(req: Request) {
     session.idToken = "";
     session.customerId = "";
 
-    session.email = email.toLowerCase();
-    session.otpEmail = email.toLowerCase();
+    session.email = destinationEmail;
+    session.otpEmail = destinationEmail;
     session.otpCode = otpHashed;
     session.otpExpiry = otpExpiry;
 
     await session.save();
 
-    const resendApiKey = await requireEnv("RESEND_API_KEY");
-    const resendFromEmail = await requireEnv("RESEND_FROM_EMAIL");
-    // Note: With from = onboarding@resend.dev, Resend only delivers to the email you signed up with.
-    // To send OTP to any customer, verify your own domain in Resend and set RESEND_FROM_EMAIL to e.g. noreply@yourdomain.com.
-
-    const resend = new Resend(resendApiKey);
-
-    stage = "resend_send";
-    await resend.emails.send({
-      from: resendFromEmail,
-      to: email,
-      subject: "OTP code for login",
-      html: `
-        <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-          <h2>Your OTP code</h2>
-          <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #000;">${otp}</p>
-          <p>This code will expire in <strong>10 minutes</strong></p>
-          <p style="color: #666; font-size: 12px;">If you didn’t request this, please ignore.</p>
-        </div>
-      `,
-    });
+    if (inputIsEmail) {
+      // Email-based OTP (current implementation).
+      stage = "resend_send";
+      await sendOtpEmail({ to: destinationEmail, otp });
+    } else {
+      // Phone-based OTP: call SMS sender (stub for now),
+      // but do NOT send OTP via email.
+      stage = "sms_send";
+      await sendOtpSms({ toPhoneE164: normalizedPhone, otp });
+    }
 
     // Return OTP so you can see it on screen.
     const debugOtp = otp;
-    return NextResponse.json({ success: true, debugOtp });
+    return NextResponse.json({ success: true, debugOtp, destinationEmail });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send OTP.";
     return NextResponse.json(

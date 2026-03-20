@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE_NAME } from "@/lib/session";
+import { LOGIN_PAGE_INTERNAL_COOKIE_NAME, SESSION_COOKIE_NAME } from "@/lib/session";
 
 export async function middleware(request: NextRequest) {
   const cookieValue = request.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -13,7 +13,15 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", returnTo);
     loginUrl.searchParams.set("error", "missing_session_cookie");
-    return NextResponse.redirect(loginUrl);
+    const res = NextResponse.redirect(loginUrl);
+    res.cookies.set(LOGIN_PAGE_INTERNAL_COOKIE_NAME, "1", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 5, // 5 minutes
+      path: "/",
+    });
+    return res;
   }
 
   return NextResponse.next();

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { getCountryCallingCode, getCountries } from "libphonenumber-js";
 
 function getAccentClasses() {
   return {
@@ -10,7 +11,8 @@ function getAccentClasses() {
   };
 }
 
-type OTPStep = "email" | "otp";
+type OTPStep = "method" | "otp";
+type LoginMode = "email" | "phone";
 
 function maskEmail(email: string): string {
   const trimmed = email.trim();
@@ -22,12 +24,104 @@ function maskEmail(email: string): string {
   return `${first}***@${domain}`;
 }
 
+function maskPhone(e164: string): string {
+  const normalized = normalizePhone(e164);
+  const withPlus = normalized.startsWith("+");
+  const digits = withPlus ? normalized.slice(1) : normalized;
+  if (!digits) return e164.trim();
+  const head = digits.slice(0, 2);
+  const tail = digits.slice(-2);
+  const middle = digits.length > 4 ? "****" : "";
+  const maskedDigits = `${head}${middle}${tail}`;
+  return withPlus ? `+${maskedDigits}` : maskedDigits;
+}
+
+function isValidEmail(input: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.trim());
+}
+
+function normalizePhone(rawPhone: string): string {
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
+  }
+  return trimmed.replace(/\D/g, "");
+}
+
+function isValidPhone(rawPhone: string): boolean {
+  const normalized = normalizePhone(rawPhone);
+  const digits = normalized.startsWith("+") ? normalized.slice(1) : normalized;
+  return /^\d{8,15}$/.test(digits);
+}
+
+function iso2ToFlagEmoji(iso2: string): string {
+  // Convert ISO-3166 alpha-2 -> regional indicator symbols.
+  const upper = iso2.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(upper)) return "";
+  const A_CODE = "A".charCodeAt(0);
+  const first = upper.charCodeAt(0) - A_CODE + 0x1f1e6;
+  const second = upper.charCodeAt(1) - A_CODE + 0x1f1e6;
+  return String.fromCodePoint(first, second);
+}
+
+type CountryCallingInfo = { iso2: string; dialCode: string; dialDigits: string };
+
+const DEFAULT_DIAL_CODE = "+66";
+
+const ALL_COUNTRY_CALLING_CODES: CountryCallingInfo[] = (() => {
+  const iso2s = getCountries();
+  const list: CountryCallingInfo[] = [];
+  for (const iso2 of iso2s) {
+    try {
+      const dialCodeNumber = getCountryCallingCode(iso2);
+      if (!dialCodeNumber) continue;
+      const dialDigits = String(dialCodeNumber);
+      list.push({ iso2, dialCode: `+${dialDigits}`, dialDigits });
+    } catch {
+      // ignore invalid iso2
+    }
+  }
+  return list;
+})();
+
+const DIAL_CODE_CANDIDATES_DESC = [...ALL_COUNTRY_CALLING_CODES].sort((a, b) => b.dialDigits.length - a.dialDigits.length);
+
+const ISO2_BY_DIAL_CODE = new Map<string, string>();
+for (const c of ALL_COUNTRY_CALLING_CODES) {
+  if (!ISO2_BY_DIAL_CODE.has(c.dialCode)) {
+    ISO2_BY_DIAL_CODE.set(c.dialCode, c.iso2);
+  }
+}
+
+function parsePhoneHint(hintRaw: string): { dialCode: string; localNumber: string } {
+  const hint = hintRaw.trim();
+  if (!hint) return { dialCode: DEFAULT_DIAL_CODE, localNumber: "" };
+
+  const normalized = normalizePhone(hint);
+  const digits = normalized.startsWith("+") ? normalized.slice(1) : normalized;
+
+  if (!digits) return { dialCode: DEFAULT_DIAL_CODE, localNumber: "" };
+
+  for (const c of DIAL_CODE_CANDIDATES_DESC) {
+    if (!c.dialDigits) continue;
+    if (digits.startsWith(c.dialDigits)) {
+      const localNumber = digits.slice(c.dialDigits.length);
+      return { dialCode: c.dialCode, localNumber };
+    }
+  }
+
+  // Fallback: keep default country code and treat the rest as local number.
+  return { dialCode: DEFAULT_DIAL_CODE, localNumber: digits };
+}
+
 function formatSeconds(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return s.toString().padStart(2, "0");
 }
 
-function getLoginHintEmail(returnTo: string, searchParams: URLSearchParams): string {
+function getLoginHintIdentifier(returnTo: string, searchParams: URLSearchParams): string {
   const direct = searchParams.get("login_hint");
   if (direct && direct.trim()) return decodeURIComponent(direct.trim());
   try {
@@ -45,9 +139,16 @@ export default function LoginClient() {
   const returnTo = searchParams.get("returnTo") ?? "/profile";
   const error = searchParams.get("error");
 
-  const loginHintEmail = useMemo(() => getLoginHintEmail(returnTo, searchParams), [returnTo, searchParams]);
-  const [otpStep, setOtpStep] = useState<OTPStep>("email");
-  const [email, setEmail] = useState(loginHintEmail);
+  const loginHintIdentifier = useMemo(
+    () => getLoginHintIdentifier(returnTo, searchParams),
+    [returnTo, searchParams]
+  );
+  const [otpStep, setOtpStep] = useState<OTPStep>("method");
+  const [loginMode, setLoginMode] = useState<LoginMode>("email");
+  const [email, setEmail] = useState("");
+  const [phoneCountryCode, setPhoneCountryCode] = useState<string>("+66");
+  const [phoneCountryIso2, setPhoneCountryIso2] = useState<string>(ISO2_BY_DIAL_CODE.get("+66") ?? "TH");
+  const [phoneNumber, setPhoneNumber] = useState<string>("");
   const [otp, setOtp] = useState("");
   const [maskedEmail, setMaskedEmail] = useState<string | null>(null);
   const [debugOtp, setDebugOtp] = useState<string | null>(null);
@@ -62,12 +163,88 @@ export default function LoginClient() {
   const accent = useMemo(() => getAccentClasses(), []);
   const canResend = secondsLeft <= 0;
 
-  useEffect(() => {
-    if (loginHintEmail && !appliedLoginHint.current) {
-      setEmail(loginHintEmail);
-      appliedLoginHint.current = true;
+  const emailTrimmed = email.trim();
+  const emailFormatError =
+    emailTrimmed.length > 0 && !isValidEmail(emailTrimmed) ? "Invalid email format" : null;
+
+  const phoneLocalDigits = phoneNumber.replace(/\D/g, "");
+  const phoneCountryCodeTrimmed = phoneCountryCode.trim();
+  const fullPhoneForValidation = phoneLocalDigits ? `${phoneCountryCodeTrimmed}${phoneLocalDigits}` : "";
+  const phoneFormatError =
+    phoneLocalDigits.length > 0 && !isValidPhone(fullPhoneForValidation)
+      ? "Invalid phone format"
+      : null;
+
+  const countryDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+
+  const regionNames = useMemo(() => {
+    try {
+      if (typeof Intl === "undefined" || !(Intl as any).DisplayNames) return null;
+      return new Intl.DisplayNames(["en"], { type: "region" });
+    } catch {
+      return null;
     }
-  }, [loginHintEmail]);
+  }, []);
+
+  const phoneCountryOptions = useMemo(() => {
+    return ALL_COUNTRY_CALLING_CODES.map((c) => ({
+      iso2: c.iso2,
+      dialDigits: c.dialDigits,
+      dialCode: c.dialCode,
+      name: regionNames?.of(c.iso2) ?? c.iso2,
+      flag: iso2ToFlagEmoji(c.iso2),
+    }));
+  }, [regionNames]);
+
+  const selectedCountryOption = useMemo(() => {
+    return phoneCountryOptions.find((o) => o.iso2 === phoneCountryIso2) ?? phoneCountryOptions.find((o) => o.dialCode === phoneCountryCode) ?? phoneCountryOptions[0];
+  }, [phoneCountryIso2, phoneCountryCode, phoneCountryOptions]);
+
+  const filteredCountryOptions = useMemo(() => {
+    const q = countrySearch.trim().toLowerCase();
+    if (!q) return phoneCountryOptions;
+    return phoneCountryOptions.filter((o) => {
+      const dial = o.dialCode.replace(/\D/g, "");
+      return o.name.toLowerCase().includes(q) || dial.includes(q) || o.iso2.toLowerCase().includes(q) || o.dialCode.includes(q);
+    });
+  }, [countrySearch, phoneCountryOptions]);
+
+  useEffect(() => {
+    setCountryDropdownOpen(false);
+    setCountrySearch("");
+  }, [loginMode]);
+
+  useEffect(() => {
+    if (!countryDropdownOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const el = countryDropdownRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) {
+        setCountryDropdownOpen(false);
+        setCountrySearch("");
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [countryDropdownOpen]);
+
+  useEffect(() => {
+    if (!loginHintIdentifier || appliedLoginHint.current) return;
+    const hint = loginHintIdentifier.trim();
+    if (isValidEmail(hint)) {
+      setLoginMode("email");
+      setEmail(hint);
+    } else if (isValidPhone(hint)) {
+      setLoginMode("phone");
+      const parsed = parsePhoneHint(hint);
+      setPhoneCountryCode(parsed.dialCode);
+      setPhoneCountryIso2(ISO2_BY_DIAL_CODE.get(parsed.dialCode) ?? (ISO2_BY_DIAL_CODE.get("+66") ?? "TH"));
+      setPhoneNumber(parsed.localNumber);
+    }
+    appliedLoginHint.current = true;
+  }, [loginHintIdentifier]);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -82,9 +259,24 @@ export default function LoginClient() {
     setDebugOtp(null);
 
     const normalizedEmail = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setFormError("Please enter a valid email");
-      return;
+    const phoneLocalDigits = phoneNumber.replace(/\D/g, "");
+    const fullPhone = phoneLocalDigits ? `${phoneCountryCode}${phoneLocalDigits}` : "";
+
+    const identifier =
+      loginMode === "email"
+        ? normalizedEmail
+        : fullPhone;
+
+    if (loginMode === "email") {
+      if (!identifier || !isValidEmail(identifier)) {
+        setFormError(emailFormatError ?? "Please enter a valid email");
+        return;
+      }
+    } else {
+      if (!identifier || !isValidPhone(identifier)) {
+        setFormError(phoneFormatError ?? "Please enter a valid phone number");
+        return;
+      }
     }
 
     setSendLoading(true);
@@ -92,13 +284,18 @@ export default function LoginClient() {
       const res = await fetch("/api/auth/otp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
+        body: JSON.stringify({ identifier }),
       });
 
       const rawText = await res.text().catch(() => "");
-      let data: { success?: boolean; error?: string; debugOtp?: string } = {};
+      let data: { success?: boolean; error?: string; debugOtp?: string; destinationEmail?: string } = {};
       try {
-        data = JSON.parse(rawText) as { success?: boolean; error?: string; debugOtp?: string };
+        data = JSON.parse(rawText) as {
+          success?: boolean;
+          error?: string;
+          debugOtp?: string;
+          destinationEmail?: string;
+        };
       } catch {
         // ignore - rawText might be an HTML error page
       }
@@ -112,7 +309,18 @@ export default function LoginClient() {
 
       setOtpStep("otp");
       setOtp("");
-      setMaskedEmail(maskEmail(normalizedEmail));
+      const destinationEmail =
+        typeof data.destinationEmail === "string"
+          ? data.destinationEmail
+          : loginMode === "email"
+            ? identifier
+            : "";
+      if (loginMode === "phone") {
+        const maskedPhone = maskPhone(fullPhone || identifier);
+        setMaskedEmail(maskedPhone);
+      } else {
+        setMaskedEmail(destinationEmail ? maskEmail(destinationEmail) : null);
+      }
       setSecondsLeft(60);
       setDebugOtp(typeof data.debugOtp === "string" ? data.debugOtp : null);
     } catch (err) {
@@ -125,7 +333,6 @@ export default function LoginClient() {
 
   async function verifyOtp() {
     setFormError(null);
-    const normalizedEmail = email.trim();
 
     if (!/^\d{6}$/.test(otp.trim())) {
       setFormError("OTP must be a 6-digit number");
@@ -137,7 +344,7 @@ export default function LoginClient() {
       const res = await fetch("/api/auth/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, otp: otp.trim(), returnTo }),
+        body: JSON.stringify({ otp: otp.trim(), returnTo }),
       });
 
       const rawText = await res.text().catch(() => "");
@@ -190,7 +397,7 @@ export default function LoginClient() {
               Sign in
             </h1>
             <p className="mt-2 text-slate-400 font-sans text-sm">
-              We’ll send a one-time code to your email to securely access your profile.
+              We'll send a one-time code to your account to securely access your profile.
             </p>
           </div>
 
@@ -204,24 +411,165 @@ export default function LoginClient() {
           ) : null}
 
           <div className="mt-4">
-            {/* OTP step: email */}
+            {/* OTP step: method */}
             <div
               className={`transition-all duration-300 ${
-                otpStep === "email" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 pointer-events-none h-0 overflow-hidden"
+                otpStep === "method" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 pointer-events-none h-0 overflow-hidden"
               }`}
             >
-              <label className="block text-sm text-slate-200 mb-2 font-medium" htmlFor="otp-email">
-                Email
-              </label>
-              <input
-                id="otp-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                autoComplete="email"
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30"
-              />
+              {loginMode === "email" ? (
+                <div>
+                  <label className="block text-sm text-slate-200 mb-2 font-medium" htmlFor="otp-email">
+                    Email
+                  </label>
+                  <input
+                    id="otp-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30"
+                  />
+                  {emailFormatError ? <div className="mt-2 text-xs text-red-300">{emailFormatError}</div> : null}
+
+                  <div className="mt-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginMode("phone");
+                        setOtpStep("method");
+                        setOtp("");
+                        setMaskedEmail(null);
+                        setDebugOtp(null);
+                        setFormError(null);
+                        setSecondsLeft(0);
+                      }}
+                      className="text-sm font-medium underline text-amber-300 hover:text-amber-200 transition"
+                    >
+                      Login by phone
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm text-slate-200 mb-2 font-medium" htmlFor="otp-phone-local">
+                    Phone
+                  </label>
+                  <div className="grid grid-cols-[8rem_1fr] gap-3">
+                    <div ref={countryDropdownRef} className="relative">
+                      <button
+                        type="button"
+                        aria-haspopup="listbox"
+                        aria-expanded={countryDropdownOpen}
+                        onClick={() => {
+                          setCountryDropdownOpen((prev) => !prev);
+                          setCountrySearch("");
+                        }}
+                        className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-lg leading-none">{selectedCountryOption?.flag ?? "🏳️"}</span>
+                          <span className="font-medium whitespace-nowrap">{phoneCountryCode}</span>
+                        </div>
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-slate-300 shrink-0" aria-hidden="true">
+                          <path
+                            fillRule="evenodd"
+                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.52a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+
+                      {countryDropdownOpen ? (
+                        <div className="absolute left-0 mt-2 z-20 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-[#0a0e17]/95 backdrop-blur-xl shadow-2xl p-3">
+                          <input
+                            type="text"
+                            value={countrySearch}
+                            onChange={(e) => setCountrySearch(e.target.value)}
+                            placeholder="Search country or code"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30 text-sm"
+                            autoFocus
+                          />
+
+                          <div className="mt-2 max-h-56 overflow-auto">
+                            {filteredCountryOptions.length ? (
+                              <ul role="listbox" className="space-y-1">
+                                {filteredCountryOptions.map((opt) => {
+                                  const isSelected = opt.iso2 === phoneCountryIso2;
+                                  return (
+                                    <li key={opt.iso2}>
+                                      <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={isSelected}
+                                        onClick={() => {
+                                          setPhoneCountryIso2(opt.iso2);
+                                          setPhoneCountryCode(opt.dialCode);
+                                          setCountryDropdownOpen(false);
+                                          setCountrySearch("");
+                                          setFormError(null);
+                                        }}
+                                        className={`w-full text-left rounded-lg px-3 py-2 text-sm transition ${
+                                          isSelected
+                                            ? "bg-amber-500/15 border border-amber-500/25"
+                                            : "hover:bg-white/10"
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-base">{opt.flag}</span>
+                                            <span className="truncate">{opt.name}</span>
+                                          </div>
+                                          <span className="font-medium text-slate-200 whitespace-nowrap">{opt.dialCode}</span>
+                                        </div>
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : (
+                              <div className="text-xs text-slate-400 px-2 py-2">No results</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <input
+                      id="otp-phone-local"
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d]/g, "").slice(0, 15))}
+                      placeholder="0812345678"
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30"
+                    />
+                  </div>
+                  {phoneFormatError ? <div className="mt-2 text-xs text-red-300">{phoneFormatError}</div> : null}
+
+                  <div className="mt-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginMode("email");
+                        setOtpStep("method");
+                        setOtp("");
+                        setMaskedEmail(null);
+                        setDebugOtp(null);
+                        setFormError(null);
+                        setSecondsLeft(0);
+                      }}
+                      className="text-sm font-medium underline text-amber-300 hover:text-amber-200 transition"
+                    >
+                      Login by email
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"
@@ -305,16 +653,6 @@ export default function LoginClient() {
 
           <div className="mt-6 text-center text-xs text-slate-400">
             By continuing, you agree to Shopify’s authentication flow.
-          </div>
-
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => router.push("/profile")}
-              className="text-sm text-slate-400 hover:text-slate-200 transition"
-            >
-              Go to profile
-            </button>
           </div>
         </div>
       </div>

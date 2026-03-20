@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser, getOidcClientId, validateRedirectUriOrThrow } from "@/lib/oidc/client";
 import { createAuthorizationCode } from "@/lib/oidc/store";
 import { getRequestOriginFromHeaders } from "@/lib/shopify-auth";
+import { LOGIN_PAGE_INTERNAL_COOKIE_NAME } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -9,7 +10,15 @@ function redirectToLogin(request: NextRequest, returnTo: string) {
   const origin = getRequestOriginFromHeaders(request.headers);
   const loginUrl = new URL("/login", origin);
   loginUrl.searchParams.set("returnTo", returnTo);
-  return NextResponse.redirect(loginUrl.toString());
+  const res = NextResponse.redirect(loginUrl.toString());
+  res.cookies.set(LOGIN_PAGE_INTERNAL_COOKIE_NAME, "1", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 5, // 5 minutes
+    path: "/",
+  });
+  return res;
 }
 
 function errorJson(error: string, errorDescription: string, status = 400) {

@@ -110,7 +110,7 @@ async function ProfileContent() {
       : !hasCustomerAccountAccessToken
         ? "access_token_missing"
         : "session_invalid";
-    redirect(`/login?returnTo=/profile&error=${encodeURIComponent(reason)}`);
+    redirect(`/api/internal/login?returnTo=/profile&error=${encodeURIComponent(reason)}`);
   }
 
   let customer = null as null | {
@@ -131,15 +131,13 @@ async function ProfileContent() {
     customer = profile.customer;
   } catch (err) {
     redirect(
-      `/login?returnTo=/profile&error=${encodeURIComponent(classifyProfileFetchError(
-        err
-      ))}`
+      `/api/internal/login?returnTo=/profile&error=${encodeURIComponent(classifyProfileFetchError(err))}`
     );
   }
 
   if (!customer) {
     redirect(
-      `/login?returnTo=/profile&error=${encodeURIComponent("customer_not_found")}`
+      `/api/internal/login?returnTo=/profile&error=${encodeURIComponent("customer_not_found")}`
     );
   }
 

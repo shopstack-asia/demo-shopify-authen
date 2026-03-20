@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOidcIssuer, validateRedirectUriOrThrow } from "@/lib/oidc/client";
 import { cookies } from "next/headers";
-import { getSession, SESSION_COOKIE_NAME } from "@/lib/session";
+import { getSession, LOGIN_PAGE_INTERNAL_COOKIE_NAME, SESSION_COOKIE_NAME } from "@/lib/session";
 import { discoverAuthEndpoints } from "@/lib/shopify-auth";
 
 export const runtime = "nodejs";
@@ -15,12 +15,28 @@ function redirectToLogin() {
   const storeDomainRaw = process.env.SHOPIFY_STORE_DOMAIN ?? "";
   const storeDomain = storeDomainRaw.trim().replace(/^https?:\/\//i, "");
   if (storeDomain) {
-    return NextResponse.redirect(`https://${storeDomain}/`, 302);
+    const res = NextResponse.redirect(`https://${storeDomain}/`, 302);
+    res.cookies.set(LOGIN_PAGE_INTERNAL_COOKIE_NAME, "1", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 5, // 5 minutes
+      path: "/",
+    });
+    return res;
   }
 
   const issuer = getOidcIssuer();
   const loginUrl = new URL("/login", issuer);
-  return NextResponse.redirect(loginUrl.toString(), 302);
+  const res = NextResponse.redirect(loginUrl.toString(), 302);
+  res.cookies.set(LOGIN_PAGE_INTERNAL_COOKIE_NAME, "1", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 5, // 5 minutes
+    path: "/",
+  });
+  return res;
 }
 
 async function logoutCore(request: NextRequest, postLogoutRedirectUriFromQuery: string) {

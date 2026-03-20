@@ -31,9 +31,6 @@ export async function POST(req: Request) {
     const otp = typeof body.otp === "string" ? body.otp.trim() : "";
     const returnTo = sanitizeReturnTo(body.returnTo);
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ success: false, error: "Invalid email" }, { status: 400 });
-    }
     if (!/^\d{6}$/.test(otp)) {
       return NextResponse.json(
         { success: false, error: "OTP must be a 6-digit number" },
@@ -55,12 +52,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const normalizedEmail = email.toLowerCase();
-    if (normalizedEmail !== otpEmail.toLowerCase()) {
-      return NextResponse.json(
-        { success: false, error: "Invalid or expired OTP" },
-        { status: 401 }
-      );
+    const otpEmailLower = otpEmail.toLowerCase();
+    if (email) {
+      const normalizedProvidedEmail = email.toLowerCase();
+      if (normalizedProvidedEmail !== otpEmailLower) {
+        return NextResponse.json(
+          { success: false, error: "Invalid or expired OTP" },
+          { status: 401 }
+        );
+      }
     }
 
     // Expiry check (always before hash compare).
@@ -85,7 +85,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const customer = await getCustomerByEmailFromAdmin(email);
+    const customer = await getCustomerByEmailFromAdmin(otpEmailLower);
     if (!customer) {
       // OTP was for an email that existed at send time; treat missing customer as failure.
       return NextResponse.json(
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
     // Verify success: update session. Remove OTP fields immediately.
     session.isLoggedIn = true;
     session.customerId = customer.id;
-    session.email = normalizedEmail;
+    session.email = otpEmailLower;
 
     session.accessToken = "";
     session.refreshToken = "";

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, LOGIN_PAGE_INTERNAL_COOKIE_NAME } from "@/lib/session";
 import {
   decodeJwtNonce,
   decodeJwtSub,
@@ -15,7 +15,15 @@ function redirectToLoginWithError(request: NextRequest, errorMessage: string) {
   const base = appUrl.endsWith("/") ? appUrl.slice(0, -1) : appUrl;
   const loginUrl = new URL("/login", base);
   loginUrl.searchParams.set("error", errorMessage);
-  return NextResponse.redirect(loginUrl);
+  const res = NextResponse.redirect(loginUrl);
+  res.cookies.set(LOGIN_PAGE_INTERNAL_COOKIE_NAME, "1", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 5, // 5 minutes
+    path: "/",
+  });
+  return res;
 }
 
 function sanitizeReturnTo(input: unknown): string {
