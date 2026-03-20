@@ -66,7 +66,7 @@ To send users from your Shopify store’s default login to this Next.js app:
 2. **Change the URL** to your Next.js app’s login URL, e.g.  
    `https://your-next-app.com/login?returnTo=/profile`  
    (or the same on your deployed domain).
-3. Optionally, add a **redirect back to Shopify** after login by using `returnTo` with your store URL when you call the login API (or rely on Multipass if you use it).
+3. Optionally, add a **redirect back to Shopify** after login by using `returnTo` with your store URL when you call the login API.
 
 If you use a **custom storefront** (e.g. headless), point the “Log in” / “Account” actions to this app’s `/login` and `/profile` routes instead of Shopify’s `/account/login`.
 
