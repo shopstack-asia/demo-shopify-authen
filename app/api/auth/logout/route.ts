@@ -18,8 +18,12 @@ export async function POST(request: NextRequest) {
   session.state = "";
   session.returnTo = "";
   session.otpEmail = undefined;
+  session.otpPhone = undefined;
+  session.otpPurpose = undefined;
+  session.otpIdentifierType = undefined;
   session.otpCode = undefined;
   session.otpExpiry = undefined;
+  session.registration = undefined;
   try {
     await session.destroy();
   } finally {

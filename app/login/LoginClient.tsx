@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCountryCallingCode, getCountries } from "libphonenumber-js";
+import PhoneInput from "./PhoneInput";
 
 function getAccentClasses() {
   return {
@@ -457,98 +458,17 @@ export default function LoginClient() {
                   <label className="block text-sm text-slate-200 mb-2 font-medium" htmlFor="otp-phone-local">
                     Phone
                   </label>
-                  <div className="grid grid-cols-[8rem_1fr] gap-3">
-                    <div ref={countryDropdownRef} className="relative">
-                      <button
-                        type="button"
-                        aria-haspopup="listbox"
-                        aria-expanded={countryDropdownOpen}
-                        onClick={() => {
-                          setCountryDropdownOpen((prev) => !prev);
-                          setCountrySearch("");
-                        }}
-                        className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30 flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-lg leading-none">{selectedCountryOption?.flag ?? "🏳️"}</span>
-                          <span className="font-medium whitespace-nowrap">{phoneCountryCode}</span>
-                        </div>
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-slate-300 shrink-0" aria-hidden="true">
-                          <path
-                            fillRule="evenodd"
-                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.52a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-
-                      {countryDropdownOpen ? (
-                        <div className="absolute left-0 mt-2 z-20 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-[#0a0e17]/95 backdrop-blur-xl shadow-2xl p-3">
-                          <input
-                            type="text"
-                            value={countrySearch}
-                            onChange={(e) => setCountrySearch(e.target.value)}
-                            placeholder="Search country or code"
-                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30 text-sm"
-                            autoFocus
-                          />
-
-                          <div className="mt-2 max-h-56 overflow-auto">
-                            {filteredCountryOptions.length ? (
-                              <ul role="listbox" className="space-y-1">
-                                {filteredCountryOptions.map((opt) => {
-                                  const isSelected = opt.iso2 === phoneCountryIso2;
-                                  return (
-                                    <li key={opt.iso2}>
-                                      <button
-                                        type="button"
-                                        role="option"
-                                        aria-selected={isSelected}
-                                        onClick={() => {
-                                          setPhoneCountryIso2(opt.iso2);
-                                          setPhoneCountryCode(opt.dialCode);
-                                          setCountryDropdownOpen(false);
-                                          setCountrySearch("");
-                                          setFormError(null);
-                                        }}
-                                        className={`w-full text-left rounded-lg px-3 py-2 text-sm transition ${
-                                          isSelected
-                                            ? "bg-amber-500/15 border border-amber-500/25"
-                                            : "hover:bg-white/10"
-                                        }`}
-                                      >
-                                        <div className="flex items-center justify-between gap-3">
-                                          <div className="flex items-center gap-2 min-w-0">
-                                            <span className="text-base">{opt.flag}</span>
-                                            <span className="truncate">{opt.name}</span>
-                                          </div>
-                                          <span className="font-medium text-slate-200 whitespace-nowrap">{opt.dialCode}</span>
-                                        </div>
-                                      </button>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            ) : (
-                              <div className="text-xs text-slate-400 px-2 py-2">No results</div>
-                            )}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <input
-                      id="otp-phone-local"
-                      name="phone"
-                      type="tel"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d]/g, "").slice(0, 15))}
-                      placeholder="0812345678"
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-amber-400/30"
-                    />
-                  </div>
+                  <PhoneInput
+                    phoneCountryCode={phoneCountryCode}
+                    phoneCountryIso2={phoneCountryIso2}
+                    phoneLocalNumber={phoneNumber}
+                    onChange={(next) => {
+                      setPhoneCountryIso2(next.phoneCountryIso2);
+                      setPhoneCountryCode(next.phoneCountryCode);
+                      setPhoneNumber(next.phoneLocalNumber);
+                      setFormError(null);
+                    }}
+                  />
                   {phoneFormatError ? <div className="mt-2 text-xs text-red-300">{phoneFormatError}</div> : null}
 
                   <div className="mt-3 text-right">

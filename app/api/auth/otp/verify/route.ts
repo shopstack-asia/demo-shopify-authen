@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { getSession } from "@/lib/session";
-import { getCustomerByEmailFromAdmin } from "@/lib/shopify-admin";
+import {
+  createCustomerInAdmin,
+  getCustomerByEmailFromAdmin,
+  getCustomerByPhoneFromAdmin,
+  updateCustomerInAdmin,
+} from "@/lib/shopify-admin";
 
 export const runtime = "nodejs";
 
@@ -18,16 +23,16 @@ function constantTimeCompareHex(aHex: string, bHex: string): boolean {
 }
 
 function sanitizeReturnTo(input: unknown): string {
-  const value = typeof input === "string" ? input : "";
+  const value = typeof input === "string" ? input.trim() : "";
   if (!value) return "/profile";
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
   if (value.startsWith("/") && !value.startsWith("//")) return value;
   return "/profile";
 }
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { email?: unknown; otp?: unknown; returnTo?: unknown };
-    const email = typeof body.email === "string" ? body.email.trim() : "";
+    const body = (await req.json()) as { otp?: unknown; returnTo?: unknown; email?: unknown };
     const otp = typeof body.otp === "string" ? body.otp.trim() : "";
     const returnTo = sanitizeReturnTo(body.returnTo);
 
@@ -39,35 +44,30 @@ export async function POST(req: Request) {
     }
 
     const session = await getSession();
+    const otpPurpose = session.otpPurpose ?? "login";
+    const otpIdentifierType = session.otpIdentifierType;
 
     const otpEmail = session.otpEmail;
+    const otpPhone = session.otpPhone;
     const otpCode = session.otpCode;
     const otpExpiry = session.otpExpiry;
 
-    // Validate OTP present in session.
-    if (!otpEmail || !otpCode || typeof otpExpiry !== "number") {
-      return NextResponse.json(
-        { success: false, error: "Invalid or expired OTP" },
-        { status: 401 }
-      );
-    }
+    const otpIdentifier =
+      otpIdentifierType === "email" ? otpEmail : otpIdentifierType === "phone" ? otpPhone : undefined;
 
-    const otpEmailLower = otpEmail.toLowerCase();
-    if (email) {
-      const normalizedProvidedEmail = email.toLowerCase();
-      if (normalizedProvidedEmail !== otpEmailLower) {
-        return NextResponse.json(
-          { success: false, error: "Invalid or expired OTP" },
-          { status: 401 }
-        );
-      }
+    // Validate OTP present in session.
+    if (!otpIdentifierType || !otpIdentifier || !otpCode || typeof otpExpiry !== "number") {
+      return NextResponse.json({ success: false, error: "Invalid or expired OTP" }, { status: 401 });
     }
 
     // Expiry check (always before hash compare).
     if (Date.now() >= otpExpiry) {
       session.otpEmail = undefined;
+      session.otpPhone = undefined;
       session.otpCode = undefined;
       session.otpExpiry = undefined;
+      session.otpPurpose = undefined;
+      session.otpIdentifierType = undefined;
       await session.save();
 
       return NextResponse.json(
@@ -85,41 +85,140 @@ export async function POST(req: Request) {
       );
     }
 
-    const customer = await getCustomerByEmailFromAdmin(otpEmailLower);
-    if (!customer) {
-      // OTP was for an email that existed at send time; treat missing customer as failure.
-      return NextResponse.json(
-        { success: false, error: "Account not found in the system" },
-        { status: 401 }
-      );
+    if (otpPurpose === "login") {
+      // Login OTP path: if customer exists -> login; else -> registration.
+      const otpEmailLower = otpIdentifierType === "email" ? otpEmail!.toLowerCase() : "";
+      const otpPhoneValue = otpIdentifierType === "phone" ? otpPhone! : "";
+
+      const customer =
+        otpIdentifierType === "email"
+          ? await getCustomerByEmailFromAdmin(otpEmailLower)
+          : await getCustomerByPhoneFromAdmin(otpPhoneValue);
+
+      if (customer) {
+        session.isLoggedIn = true;
+        session.customerId = customer.id;
+        session.email = customer.email ? customer.email.toLowerCase() : otpEmailLower;
+
+        session.accessToken = "";
+        session.refreshToken = "";
+        session.idToken = "";
+        session.nonce = "";
+        session.state = "";
+        session.codeVerifier = "";
+
+        session.registration = undefined;
+
+        session.otpEmail = undefined;
+        session.otpPhone = undefined;
+        session.otpPurpose = undefined;
+        session.otpIdentifierType = undefined;
+        session.otpCode = undefined;
+        session.otpExpiry = undefined;
+
+        await session.save();
+        return NextResponse.json({ success: true, redirectUrl: returnTo });
+      }
+
+      // Customer not found -> go to registration step.
+      session.isLoggedIn = false;
+      session.customerId = "";
+      session.email = "";
+
+      session.registration = {
+        phase: "collecting_additional_info",
+        returnTo,
+        verifiedType: otpIdentifierType,
+        lockedEmail: otpIdentifierType === "email" ? otpEmailLower : undefined,
+        lockedPhone: otpIdentifierType === "phone" ? otpPhoneValue : undefined,
+      };
+
+      session.otpEmail = undefined;
+      session.otpPhone = undefined;
+      session.otpPurpose = undefined;
+      session.otpIdentifierType = undefined;
+      session.otpCode = undefined;
+      session.otpExpiry = undefined;
+
+      await session.save();
+      return NextResponse.json({ success: true, redirectUrl: "/register" });
     }
 
-    // Verify success: update session. Remove OTP fields immediately.
-    session.isLoggedIn = true;
-    session.customerId = customer.id;
-    session.email = otpEmailLower;
+    if (otpPurpose === "registration_additional") {
+      const reg = session.registration;
+      if (!reg || reg.phase !== "waiting_additional_otp") {
+        return NextResponse.json({ success: false, error: "Registration context missing" }, { status: 400 });
+      }
 
-    session.accessToken = "";
-    session.refreshToken = "";
-    session.idToken = "";
-    session.nonce = "";
-    session.state = "";
-    session.codeVerifier = "";
+      const expectedAdditionalType = reg.verifiedType === "email" ? "phone" : "email";
+      if (otpIdentifierType !== expectedAdditionalType) {
+        return NextResponse.json(
+          { success: false, error: "OTP type does not match registration step" },
+          { status: 400 }
+        );
+      }
 
-    session.otpEmail = undefined;
-    session.otpCode = undefined;
-    session.otpExpiry = undefined;
+      const firstName = (reg.firstName ?? "").trim();
+      const lastName = (reg.lastName ?? "").trim();
+      const emailForCreate = reg.verifiedType === "email" ? reg.lockedEmail ?? "" : reg.additionalEmail ?? "";
+      const phoneForCreate = reg.verifiedType === "phone" ? reg.lockedPhone ?? "" : reg.additionalPhone ?? "";
 
-    await session.save();
+      if (!firstName || !lastName || !emailForCreate || !phoneForCreate) {
+        return NextResponse.json({ success: false, error: "Missing registration fields" }, { status: 400 });
+      }
 
-    // Redirect to the original target directly and keep the existing session cookie so
-    // user can open /profile via direct URL without re-auth flow.
-    const redirectUrl = returnTo;
+      const redirectUrl = reg.returnTo || returnTo;
 
-    return NextResponse.json({
-      success: true,
-      redirectUrl,
-    });
+      // Requirement:
+      // - After OTP passes, look up Shopify customer by the *additional* contact the user provided.
+      // - If found => update it
+      // - If not found => create a new one
+      const additionalLookupValue =
+        expectedAdditionalType === "email" ? emailForCreate.toLowerCase() : phoneForCreate;
+
+      const existing =
+        expectedAdditionalType === "email"
+          ? await getCustomerByEmailFromAdmin(additionalLookupValue)
+          : await getCustomerByPhoneFromAdmin(additionalLookupValue);
+
+      const customerInput = {
+        firstName,
+        lastName,
+        email: emailForCreate.toLowerCase(),
+        phone: phoneForCreate,
+      };
+
+      const createdOrUpdated = existing
+        ? await updateCustomerInAdmin(existing.id, customerInput)
+        : await createCustomerInAdmin(customerInput);
+
+      // Verify success: update session and login.
+      session.isLoggedIn = true;
+      session.customerId = createdOrUpdated.id;
+      session.email = createdOrUpdated.email ? createdOrUpdated.email.toLowerCase() : emailForCreate.toLowerCase();
+
+      session.accessToken = "";
+      session.refreshToken = "";
+      session.idToken = "";
+      session.nonce = "";
+      session.state = "";
+      session.codeVerifier = "";
+
+      session.registration = undefined;
+
+      session.otpEmail = undefined;
+      session.otpPhone = undefined;
+      session.otpPurpose = undefined;
+      session.otpIdentifierType = undefined;
+      session.otpCode = undefined;
+      session.otpExpiry = undefined;
+
+      await session.save();
+
+      return NextResponse.json({ success: true, redirectUrl });
+    }
+
+    return NextResponse.json({ success: false, error: "Invalid OTP purpose" }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to verify OTP.";
     return NextResponse.json({ success: false, error: message }, { status: 500 });

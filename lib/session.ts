@@ -12,11 +12,36 @@ export interface SessionData {
   returnTo: string;
   isLoggedIn: boolean;
 
-  // Custom email OTP login (Admin API + Resend)
-  email?: string; // customer email after successful OTP verify
-  otpEmail?: string; // email used to request OTP
+  // --- OTP flows (login + registration) ---
+  email?: string; // customer email after successful OTP verify (login/registration)
+
+  // Which contact type the currently stored OTP is for.
+  // (Needed because we support OTP via email or phone.)
+  otpIdentifierType?: "email" | "phone";
+  otpPurpose?: "login" | "registration_additional";
+
+  otpEmail?: string; // email used to request OTP (when otpIdentifierType="email")
+  otpPhone?: string; // phone used to request OTP (when otpIdentifierType="phone", normalized)
   otpCode?: string; // SHA256 hash (hex) of OTP code
   otpExpiry?: number; // unix ms timestamp
+
+  // Registration state stored between:
+  // 1) Initial OTP verify (where we learn which contact type was verified)
+  // 2) Collect additional info + send OTP for missing contact
+  // 3) Verify second OTP and create Shopify customer
+  registration?: {
+    phase: "collecting_additional_info" | "waiting_additional_otp";
+    returnTo: string;
+    verifiedType: "email" | "phone";
+    lockedEmail?: string;
+    lockedPhone?: string;
+
+    // Additional info collected after initial OTP success.
+    firstName?: string;
+    lastName?: string;
+    additionalEmail?: string;
+    additionalPhone?: string;
+  };
 }
 
 const defaultSession: SessionData = {

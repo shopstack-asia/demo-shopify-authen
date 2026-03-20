@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomInt, createHash } from "crypto";
 import { getSession } from "@/lib/session";
-import { getCustomerByEmailFromAdmin, getCustomerByPhoneFromAdmin } from "@/lib/shopify-admin";
 import { sendOtpEmail, sendOtpSms } from "@/lib/otp";
 
 export const runtime = "nodejs";
@@ -33,12 +32,17 @@ function sha256Hex(input: string): string {
 }
 
 export async function POST(req: Request) {
-  let stage: "admin_lookup" | "resend_send" | "sms_send" = "admin_lookup";
   try {
-    const body = (await req.json()) as { identifier?: unknown; email?: unknown; phone?: unknown };
+    const body = (await req.json()) as {
+      identifier?: unknown;
+      email?: unknown;
+      phone?: unknown;
+      purpose?: unknown;
+    };
     const identifier = typeof body.identifier === "string" ? body.identifier.trim() : "";
     const emailFromBody = typeof body.email === "string" ? body.email.trim() : "";
     const phoneFromBody = typeof body.phone === "string" ? body.phone.trim() : "";
+    const purpose = body.purpose === "registration_additional" ? "registration_additional" : "login";
 
     const candidate = emailFromBody || identifier || phoneFromBody;
     if (!candidate) {
@@ -64,26 +68,8 @@ export async function POST(req: Request) {
 
     const session = await getSession();
 
-    const customer = inputIsEmail
-      ? await getCustomerByEmailFromAdmin(email)
-      : await getCustomerByPhoneFromAdmin(normalizedPhone);
-    if (!customer) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: inputIsEmail ? "Email is not in the system" : "Phone number is not in the system",
-        },
-        { status: 400 }
-      );
-    }
-
-    const destinationEmail = inputIsEmail ? email.toLowerCase() : (customer.email ?? "").toLowerCase();
-    if (!destinationEmail) {
-      return NextResponse.json(
-        { success: false, error: "Phone number has no email associated in the system" },
-        { status: 400 }
-      );
-    }
+    // NOTE: OTP send is allowed even if the customer doesn't exist yet.
+    // We'll decide login vs registration later in `otp/verify`.
 
     // Generate 6-digit numeric OTP.
     const otp = randomInt(100000, 999999).toString();
@@ -96,32 +82,33 @@ export async function POST(req: Request) {
     session.refreshToken = "";
     session.idToken = "";
     session.customerId = "";
-
-    session.email = destinationEmail;
-    session.otpEmail = destinationEmail;
+    session.email = inputIsEmail ? email.toLowerCase() : "";
+    session.otpPurpose = purpose;
+    session.otpIdentifierType = inputIsEmail ? "email" : "phone";
+    session.otpEmail = inputIsEmail ? email.toLowerCase() : undefined;
+    session.otpPhone = inputIsEmail ? undefined : normalizedPhone;
     session.otpCode = otpHashed;
     session.otpExpiry = otpExpiry;
 
     await session.save();
 
     if (inputIsEmail) {
-      // Email-based OTP (current implementation).
-      stage = "resend_send";
-      await sendOtpEmail({ to: destinationEmail, otp });
+      await sendOtpEmail({ to: email.toLowerCase(), otp });
     } else {
-      // Phone-based OTP: call SMS sender (stub for now),
-      // but do NOT send OTP via email.
-      stage = "sms_send";
       await sendOtpSms({ toPhoneE164: normalizedPhone, otp });
     }
 
     // Return OTP so you can see it on screen.
     const debugOtp = otp;
-    return NextResponse.json({ success: true, debugOtp, destinationEmail });
+    return NextResponse.json({
+      success: true,
+      debugOtp,
+      destinationEmail: inputIsEmail ? email.toLowerCase() : "",
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send OTP.";
     return NextResponse.json(
-      { success: false, error: `${stage}: ${message}` },
+      { success: false, error: message },
       { status: 500 }
     );
   }

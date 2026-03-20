@@ -443,3 +443,102 @@ export async function getCustomerProfileFromAdmin(customerId: string): Promise<S
   };
 }
 
+export async function createCustomerInAdmin(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+}): Promise<{ id: string; email?: string | null }> {
+  const mutation = `
+    mutation CustomerCreate($input: CustomerInput!) {
+      customerCreate(input: $input) {
+        customer {
+          id
+          email
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  type CustomerCreateResponse = {
+    customerCreate?: {
+      customer?: { id: string; email?: string | null } | null;
+      userErrors?: Array<{ field?: string[] | null; message: string }>;
+    } | null;
+  };
+
+  const data = await shopifyAdminFetch<CustomerCreateResponse>(mutation, {
+    input: {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email,
+      phone: input.phone,
+    },
+  });
+
+  const errors = data.customerCreate?.userErrors ?? [];
+  if (errors.length) {
+    throw new Error(`Shopify customerCreate failed: ${errors.map((e) => e.message).join("; ")}`);
+  }
+
+  const created = data.customerCreate?.customer;
+  if (!created?.id) {
+    throw new Error("Shopify customerCreate returned no customer");
+  }
+
+  return { id: created.id, email: created.email ?? null };
+}
+
+export async function updateCustomerInAdmin(
+  customerId: string,
+  input: { firstName: string; lastName: string; email: string; phone: string }
+): Promise<{ id: string; email?: string | null }> {
+  const mutation = `
+    mutation CustomerUpdate($input: CustomerInput!) {
+      customerUpdate(input: $input) {
+        customer {
+          id
+          email
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  type CustomerUpdateResponse = {
+    customerUpdate?: {
+      customer?: { id: string; email?: string | null } | null;
+      userErrors?: Array<{ field?: string[] | null; message: string }>;
+    } | null;
+  };
+
+  const data = await shopifyAdminFetch<CustomerUpdateResponse>(mutation, {
+    input: {
+      id: customerId,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email,
+      phone: input.phone,
+    },
+  });
+
+  const errors = data.customerUpdate?.userErrors ?? [];
+  if (errors.length) {
+    throw new Error(`Shopify customerUpdate failed: ${errors.map((e) => e.message).join("; ")}`);
+  }
+
+  const updated = data.customerUpdate?.customer;
+  if (!updated?.id) {
+    throw new Error("Shopify customerUpdate returned no customer");
+  }
+
+  return { id: updated.id, email: updated.email ?? null };
+}
+

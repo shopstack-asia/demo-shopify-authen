@@ -21,7 +21,9 @@ export async function GET() {
       end_session_endpoint: `${base}/api/oidc/logout`,
       response_types_supported: ["code"],
       grant_types_supported: ["authorization_code", "refresh_token"],
-      scopes_supported: ["openid", "email"],
+      // Must include every scope you can request in the authorization flow.
+      // app/api/auth/login/route.ts requests: "openid email customer-account-api:full"
+      scopes_supported: ["openid", "email", "customer-account-api:full"],
       id_token_signing_alg_values_supported: ["RS256"],
       token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"],
     }),
